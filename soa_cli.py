@@ -57,25 +57,65 @@ def run_qwen(system_prompt, input_file, output_file, model=MODEL, temperature=TE
         input_file: Path to input file
         output_file: Path to output file
         model: Model name
-        temperature: Temperature setting
+        temperature: Temperature setting (note: Qwen CLI may not support this directly)
         
     Raises:
         RuntimeError: If Qwen execution fails
     """
-    cmd = [
-        "qwen", "run",
-        "--model", model,
-        "--system", system_prompt,
-        "--input", input_file,
-        "--output", output_file,
-        "--temperature", str(temperature)
-    ]
+    # Load system prompt
+    with open(system_prompt, 'r', encoding='utf-8') as f:
+        system_text = f.read()
+    
+    # Load input data
+    with open(input_file, 'r', encoding='utf-8') as f:
+        input_data = f.read()
+    
+    # Construct combined prompt
+    combined_prompt = f"""{system_text}
+
+# Input
+
+```json
+{input_data}
+```
+
+Generate the output as valid JSON. Return ONLY the JSON with no markdown formatting."""
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        # Invoke Qwen with stdin/stdout
+        cmd = ["qwen", "-m", model, "-y"]
+        
+        result = subprocess.run(
+            cmd,
+            input=combined_prompt,
+            capture_output=True,
+            text=True,
+            timeout=300
+        )
         
         if result.returncode != 0:
             raise RuntimeError(f"Qwen failed: {result.stderr}")
+        
+        # Parse and clean output
+        output_text = result.stdout.strip()
+        
+        # Remove markdown code blocks if present
+        if output_text.startswith("```"):
+            lines = output_text.split("\n")
+            start_idx = 1
+            if lines[0].startswith("```json"):
+                start_idx = 1
+            end_idx = len(lines) - 1
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip() == "```":
+                    end_idx = i
+                    break
+            output_text = "\n".join(lines[start_idx:end_idx])
+        
+        # Save output
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            f.write(output_text)
         
         return output_file
         

@@ -49,29 +49,70 @@ def build_thematic_contract(user_input_file="theme_input.json", model="qwen3.5-3
     print(f"[+] Loaded research scope definition")
     print(f"    Title: {user_input.get('title', 'Not specified')}")
     
+    # Load system prompt
+    system_prompt_path = Path("prompts/theme_builder.system.txt")
+    if not system_prompt_path.exists():
+        raise RuntimeError(f"System prompt not found: {system_prompt_path}")
+    
+    with open(system_prompt_path, 'r', encoding='utf-8') as f:
+        system_prompt = f.read()
+    
+    # Construct combined prompt for Qwen
+    user_input_json = json.dumps(user_input, indent=2)
+    combined_prompt = f"""{system_prompt}
+
+# Input
+
+```json
+{user_input_json}
+```
+
+Generate a thematic contract based on the above input. Return ONLY valid JSON with no markdown formatting."""
+    
     # Run theme builder agent
     output_file = THEME_CONTRACT_FILE
-    temp_output = "_theme_contract_temp.json"
     
     try:
-        cmd = [
-            "qwen", "run",
-            "--model", model,
-            "--system", "prompts/theme_builder.system.txt",
-            "--input", user_input_file,
-            "--output", temp_output,
-            "--temperature", "0.1"  # Very deterministic for scope definition
-        ]
-        
         print(f"[+] Generating thematic contract with {model}...")
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        # Invoke Qwen with stdin/stdout
+        cmd = ["qwen", "-m", model, "-y"]
+        
+        result = subprocess.run(
+            cmd,
+            input=combined_prompt,
+            capture_output=True,
+            text=True,
+            timeout=120
+        )
         
         if result.returncode != 0:
             raise RuntimeError(f"Theme builder failed: {result.stderr}")
         
-        # Load and validate
-        with open(temp_output, 'r', encoding='utf-8') as f:
-            contract = json.load(f)
+        # Parse JSON from output
+        output_text = result.stdout.strip()
+        
+        # Remove markdown code blocks if present
+        if output_text.startswith("```"):
+            lines = output_text.split("\n")
+            # Find first line after opening ``` and last line before closing ```
+            start_idx = 1
+            if lines[0].startswith("```json"):
+                start_idx = 1
+            end_idx = len(lines) - 1
+            for i in range(len(lines) - 1, -1, -1):
+                if lines[i].strip() == "```":
+                    end_idx = i
+                    break
+            output_text = "\n".join(lines[start_idx:end_idx])
+        
+        # Try to find JSON object in the text
+        json_start = output_text.find('{')
+        json_end = output_text.rfind('}') + 1
+        if json_start >= 0 and json_end > json_start:
+            output_text = output_text[json_start:json_end]
+        
+        contract = json.loads(output_text)
         
         # Validate contract structure
         required_fields = [
@@ -91,9 +132,6 @@ def build_thematic_contract(user_input_file="theme_input.json", model="qwen3.5-3
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(contract, f, indent=2)
         
-        # Clean up temp
-        Path(temp_output).unlink()
-        
         print(f"[✓] Thematic contract created: {output_file}")
         print(f"\n[Theme] {contract['global_theme']}")
         print(f"[In Scope] {len(contract['in_scope'])} items")
@@ -102,6 +140,10 @@ def build_thematic_contract(user_input_file="theme_input.json", model="qwen3.5-3
         
         return contract
         
+    except json.JSONDecodeError as e:
+        print(f"[!] Failed to parse JSON from Qwen output: {e}")
+        print(f"[!] Raw output: {result.stdout[:500]}")
+        raise
     except Exception as e:
         print(f"[!] Error building thematic contract: {e}")
         raise
