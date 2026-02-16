@@ -3,7 +3,7 @@
 ## Initial Setup (One Time)
 
 ```bash
-# 1. Setup dependencies (creates .venv)
+# 1. Setup dependencies (creates .venv, installs PyMuPDF)
 ./setup.sh
 
 # 2. Activate virtual environment
@@ -19,6 +19,12 @@ python scripts/check.py
 ```bash
 source .venv/bin/activate  # OR: source activate.sh
 ```
+
+**PDF Processing**: 
+- System automatically extracts text from PDFs (using PyMuPDF)
+- Processes first ~15-20 pages (typically contains core methodology)
+- Limits to 30,000 characters to prevent timeouts
+- Full papers with appendices are intelligently truncated
 
 ## Define Research Scope (CRITICAL FIRST STEP)
 

@@ -154,20 +154,34 @@ def build_fact_vocabulary(extracted_papers):
     vocab = set()
     
     for p in extracted_papers:
-        # Add assumptions
-        vocab.update([a.lower() for a in p.get("assumptions", []) if a])
+        # Add assumptions (handle strings and dicts)
+        for a in p.get("assumptions", []):
+            if isinstance(a, str):
+                vocab.add(a.lower())
+            elif isinstance(a, dict):
+                # Extract text from dict values
+                for v in a.values():
+                    if isinstance(v, str):
+                        vocab.add(v.lower())
         
-        # Add metrics
-        vocab.update([m.lower() for m in p.get("evaluation_metrics", []) if m])
+        # Add metrics (handle strings and dicts)
+        for m in p.get("evaluation_metrics", []):
+            if isinstance(m, str):
+                vocab.add(m.lower())
+            elif isinstance(m, dict):
+                # Extract text from dict values
+                for v in m.values():
+                    if isinstance(v, str):
+                        vocab.add(v.lower())
         
         # Add methods
         pred = p.get("prediction_component", {})
-        if pred.get("method"):
-            vocab.add(pred["method"].lower())
+        if pred and pred.get("method"):
+            vocab.add(str(pred["method"]).lower())
         
         opt = p.get("optimization_component", {})
-        if opt.get("method"):
-            vocab.add(opt["method"].lower())
+        if opt and opt.get("method"):
+            vocab.add(str(opt["method"]).lower())
         
         # Add learning paradigm
         lp = p.get("learning_paradigm", "")

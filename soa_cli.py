@@ -42,22 +42,28 @@ from src.theme_builder import (
 
 # ========== CONFIGURATION ==========
 
-MODEL = "qwen3.5-32b"
+MODEL = None  # Use default Qwen model (or specify "coder-model")
 TEMPERATURE = 0.2
 MAX_WORKERS = 6  # For parallel execution
+MAX_PDF_CHARS = 30000  # Limit PDF text to ~15-20 pages to prevent timeout
 
 
 # ========== QWEN INVOCATION ==========
 
-def extract_text_from_pdf(pdf_path):
+def extract_text_from_pdf(pdf_path, max_chars=MAX_PDF_CHARS):
     """
     Extract text from PDF using PyMuPDF.
     
+    Prioritizes first ~15-20 pages which typically contain:
+    - Abstract, Introduction, Methodology, Results (core content)
+    - Avoids lengthy appendices, references, supplementary material
+    
     Args:
         pdf_path: Path to PDF file
+        max_chars: Maximum characters to extract (to prevent timeout)
         
     Returns:
-        Extracted text as string
+        Extracted text as string (truncated if needed)
         
     Raises:
         RuntimeError: If PDF extraction fails
@@ -65,18 +71,47 @@ def extract_text_from_pdf(pdf_path):
     try:
         doc = fitz.open(pdf_path)
         text_parts = []
+        total_chars = 0
+        pages_extracted = 0
+        total_pages = len(doc)
         
-        for page_num, page in enumerate(doc, start=1):
+        # Extract up to max_chars or 25 pages, whichever comes first
+        max_pages = min(25, total_pages)
+        
+        for page_num in range(max_pages):
+            page = doc[page_num]
             text = page.get_text()
+            
             if text.strip():
-                text_parts.append(f"### Page {page_num} ###\n{text}")
+                # Check if adding this page would exceed limit
+                if total_chars + len(text) > max_chars:
+                    # Add truncated page and stop
+                    remaining = max_chars - total_chars
+                    if remaining > 500:  # Only add if significant space left
+                        text_parts.append(f"### Page {page_num + 1} (truncated) ###\n{text[:remaining]}")
+                    break
+                
+                text_parts.append(f"### Page {page_num + 1} ###\n{text}")
+                total_chars += len(text)
+                pages_extracted += 1
         
         doc.close()
         
         if not text_parts:
             raise RuntimeError("No text extracted from PDF")
         
-        return "\n\n".join(text_parts)
+        result = "\n\n".join(text_parts)
+        
+        # Add metadata header
+        metadata = f"[PDF: {Path(pdf_path).name}]\n"
+        metadata += f"[Extracted: {pages_extracted}/{total_pages} pages, {len(result):,} characters]\n"
+        if pages_extracted < total_pages:
+            metadata += f"[Note: Focused on first {pages_extracted} pages - typically contains core methodology and results]\n"
+        metadata += "\n" + "="*60 + "\n\n"
+        
+        result = metadata + result
+        
+        return result
         
     except Exception as e:
         raise RuntimeError(f"Failed to extract text from PDF: {e}")
@@ -117,7 +152,10 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
     
     try:
         # Invoke Qwen with stdin/stdout
-        cmd = ["qwen", "-m", model, "-y"]
+        if model:
+            cmd = ["qwen", "-m", model, "-y"]
+        else:
+            cmd = ["qwen", "-y"]  # Use default model
         
         result = subprocess.run(
             cmd,
@@ -370,11 +408,18 @@ def run_clustering(extracted_files, critic_files, contract, n_clusters=6):
     relevant_papers = []
     filtered_out = []
     
-    for paper_data in extracted_data:
+    for i, paper_data in enumerate(extracted_data):
+        # Get paper identifier (use paper_id if available, otherwise use filename)
+        paper_id = paper_data.get('paper_id', Path(extracted_files[i]).stem)
+        
+        # Ensure paper has paper_id field
+        if 'paper_id' not in paper_data:
+            paper_data['paper_id'] = paper_id
+        
         if thematic_filter_paper(paper_data, contract):
             relevant_papers.append(paper_data)
         else:
-            filtered_out.append(paper_data['paper_id'])
+            filtered_out.append(paper_id)
     
     print(f"[+] Thematic filter: {len(relevant_papers)}/{len(extracted_data)} papers relevant")
     if filtered_out:
@@ -383,8 +428,12 @@ def run_clustering(extracted_files, critic_files, contract, n_clusters=6):
     
     # Save relevant papers temporarily for vectorization
     relevant_files = []
-    for paper in relevant_papers:
-        temp_file = f"artifacts/extracted_filtered/{paper['paper_id']}.json"
+    for i, paper in enumerate(relevant_papers):
+        # paper_id should now be guaranteed to exist
+        paper_id = paper['paper_id']
+        # Sanitize paper_id for filename (replace invalid chars)
+        safe_id = paper_id.replace('/', '_').replace('\\', '_')[:100]
+        temp_file = f"artifacts/extracted_filtered/{safe_id}.json"
         save_json(paper, temp_file)
         relevant_files.append(temp_file)
     
@@ -399,8 +448,18 @@ def run_clustering(extracted_files, critic_files, contract, n_clusters=6):
     # Prepare input for cluster agent (with theme contract)
     merged_input_base = "artifacts/clusters/input_base.json"
     
-    critic_data = [load_json(f) for f in critic_files 
-                   if Path(f).stem in [p['paper_id'] for p in relevant_papers]]
+    # Match critics to relevant papers by filename (not by paper_id which might be DOI)
+    relevant_filenames = set(Path(f).stem for f in extracted_files 
+                           if any(Path(f).stem == Path(critic).stem for critic in critic_files))
+    critic_data = []
+    for critic_file in critic_files:
+        critic_stem = Path(critic_file).stem
+        # Check if this critic corresponds to a relevant paper
+        for i, extracted_file in enumerate(extracted_files):
+            if Path(extracted_file).stem == critic_stem:
+                if extracted_data[i] in relevant_papers:
+                    critic_data.append(load_json(critic_file))
+                break
     
     data = {
         "precomputed_clusters": raw_clusters,
@@ -507,12 +566,20 @@ def run_verification_and_repair(soa_file, extracted_files, critic_files):
     extracted_db = {}
     for f in extracted_files:
         data = load_json(f)
-        extracted_db[data["paper_id"]] = data
+        # Use paper_id if available, otherwise use filename
+        paper_id = data.get("paper_id", Path(f).stem)
+        if "paper_id" not in data:
+            data["paper_id"] = paper_id
+        extracted_db[paper_id] = data
     
     critic_db = {}
     for f in critic_files:
         data = load_json(f)
-        critic_db[data["paper_id"]] = data
+        # Use paper_id if available, otherwise use filename
+        paper_id = data.get("paper_id", Path(f).stem)
+        if "paper_id" not in data:
+            data["paper_id"] = paper_id
+        critic_db[paper_id] = data
     
     # Run repair pipeline
     success = repair_pipeline(soa_file, extracted_db, critic_db)
@@ -543,38 +610,51 @@ def main():
         print("[!] Pipeline requires thematic contract to proceed")
         sys.exit(1)
     
-    # Check for papers
-    papers_dir = Path("papers")
-    pdfs = list(papers_dir.glob("*.pdf"))
+    # Check for existing extracted papers
+    extracted_dir = Path("artifacts/extracted")
+    critic_dir = Path("artifacts/critic")
+    existing_extracted = list(extracted_dir.glob("*.json")) if extracted_dir.exists() else []
+    existing_critics = list(critic_dir.glob("*.json")) if critic_dir.exists() else []
     
-    if not pdfs:
-        print("[!] No PDF files found in papers/ directory")
-        print("[!] Please add your 43 papers to the papers/ folder")
-        sys.exit(1)
-    
-    print(f"\n[+] Found {len(pdfs)} papers")
-    
-    # Stage 1: Reader Agent
-    print("\n[Stage 1] Reading Papers")
-    print("="*60)
-    reader_outputs = []
-    for pdf in pdfs:
-        result = run_reader(pdf)
-        if result:
-            reader_outputs.append(result)
-    
-    if not reader_outputs:
-        print("[!] No papers were successfully read")
-        sys.exit(1)
-    
-    print(f"\n[✓] Successfully read {len(reader_outputs)} papers")
-    
-    # Stage 2+3: Extraction and Critique (parallel)
-    extracted, critics = run_extraction_and_critique(reader_outputs)
-    
-    if not extracted:
-        print("[!] No papers were successfully extracted")
-        sys.exit(1)
+    # If we have extracted papers, skip stages 1-3
+    if existing_extracted:
+        print(f"\n[+] Found {len(existing_extracted)} existing extracted papers")
+        print("[+] Skipping stages 1-3 (already completed)")
+        extracted = existing_extracted
+        critics = existing_critics
+    else:
+        # Check for raw papers
+        papers_dir = Path("papers")
+        pdfs = list(papers_dir.glob("*.pdf"))
+        
+        if not pdfs:
+            print("[!] No PDF files found in papers/ directory")
+            print("[!] Please add your 43 papers to the papers/ folder")
+            sys.exit(1)
+        
+        print(f"\n[+] Found {len(pdfs)} papers")
+        
+        # Stage 1: Reader Agent
+        print("\n[Stage 1] Reading Papers")
+        print("="*60)
+        reader_outputs = []
+        for pdf in pdfs:
+            result = run_reader(pdf)
+            if result:
+                reader_outputs.append(result)
+        
+        if not reader_outputs:
+            print("[!] No papers were successfully read")
+            sys.exit(1)
+        
+        print(f"\n[✓] Successfully read {len(reader_outputs)} papers")
+        
+        # Stage 2+3: Extraction and Critique (parallel)
+        extracted, critics = run_extraction_and_critique(reader_outputs)
+        
+        if not extracted:
+            print("[!] No papers were successfully extracted")
+            sys.exit(1)
     
     # Stage 4: Clustering (with thematic filtering)
     cluster_file = run_clustering(extracted, critics, contract)

@@ -15,7 +15,7 @@ from pathlib import Path
 THEME_CONTRACT_FILE = "THEMATIC_CONTRACT.json"
 
 
-def build_thematic_contract(user_input_file="theme_input.json", model="qwen3.5-32b"):
+def build_thematic_contract(user_input_file="theme_input.json", model=None):
     """
     Build the global thematic contract from user input.
     
@@ -73,10 +73,13 @@ Generate a thematic contract based on the above input. Return ONLY valid JSON wi
     output_file = THEME_CONTRACT_FILE
     
     try:
-        print(f"[+] Generating thematic contract with {model}...")
+        print(f"[+] Generating thematic contract with Qwen...")
         
         # Invoke Qwen with stdin/stdout
-        cmd = ["qwen", "-m", model, "-y"]
+        if model:
+            cmd = ["qwen", "-m", model, "-y"]
+        else:
+            cmd = ["qwen", "-y"]  # Use default model
         
         result = subprocess.run(
             cmd,
@@ -227,6 +230,7 @@ def thematic_filter_paper(paper, contract):
     Determine if a paper is thematically relevant.
     
     This is used before embedding to ensure vector DB contains only relevant papers.
+    Uses flexible keyword matching instead of exact phrase matching.
     
     Args:
         paper: Extracted paper dictionary
@@ -235,28 +239,59 @@ def thematic_filter_paper(paper, contract):
     Returns:
         Boolean - True if paper is relevant
     """
-    # Check application domain
-    domain = paper.get("application_domain", "").lower()
+    # Get in_scope and out_of_scope terms from contract
     in_scope = contract.get("in_scope", [])
+    out_of_scope = contract.get("out_of_scope", [])
     
-    domain_match = any(scope.lower() in domain for scope in in_scope)
+    # Recursively extract all text from nested structures
+    def extract_all_text(obj, max_depth=5, current_depth=0):
+        """Recursively extract text from any JSON structure"""
+        if current_depth > max_depth:
+            return []
+        
+        texts = []
+        if isinstance(obj, dict):
+            for v in obj.values():
+                texts.extend(extract_all_text(v, max_depth, current_depth + 1))
+        elif isinstance(obj, list):
+            for item in obj:
+                texts.extend(extract_all_text(item, max_depth, current_depth + 1))
+        elif isinstance(obj, str):
+            if len(obj) > 5:  # Skip very short strings
+                texts.append(obj)
+        elif obj is not None:
+            texts.append(str(obj))
+        return texts
     
-    # Check if paper uses preferred methods
-    pred_method = paper.get("prediction_component", {}).get("method", "").lower()
-    opt_method = paper.get("optimization_component", {}).get("method", "").lower()
+    # Collect all text from the paper
+    paper_text_parts = extract_all_text(paper)
     
-    preferred = contract.get("preferred_methods", [])
-    method_match = any(
-        pref.lower() in pred_method or pref.lower() in opt_method
-        for pref in preferred
+    # Combine all text
+    paper_text = " ".join(paper_text_parts).lower()
+    
+    # Extract key terms from in_scope items (e.g., "ambulance", "relocation", "ems", "demand", etc.)
+    in_scope_keywords = set()
+    for scope_item in in_scope:
+        # Split into words and keep substantive ones (3+ chars, not common words)
+        words = scope_item.lower().split()
+        keywords = [w.strip('(),.:;') for w in words if len(w) > 3 and w not in {'using', 'with', 'from', 'that', 'this', 'have'}]
+        in_scope_keywords.update(keywords)
+    
+    # Check for keyword matches (need at least 2 keywords to match)
+    keyword_matches = sum(1 for kw in in_scope_keywords if kw in paper_text)
+    keyword_threshold = min(3, max(1, len(in_scope_keywords) // 4))  # Adaptive threshold
+    
+    in_scope_match = keyword_matches >= keyword_threshold
+    
+    # Check for out-of-scope terms (strict matching)
+    out_of_scope_match = any(
+        oos.lower() in paper_text 
+        for oos in out_of_scope 
+        if len(oos) > 3
     )
     
-    # Check research problem relevance
-    problem = paper.get("research_problem", "").lower()
-    problem_match = any(scope.lower() in problem for scope in in_scope)
-    
-    # Paper is relevant if it matches domain OR problem OR methods
-    is_relevant = domain_match or problem_match or method_match
+    # Paper is relevant if it matches enough keywords AND does not match out-of-scope
+    is_relevant = in_scope_match and not out_of_scope_match
     
     return is_relevant
 

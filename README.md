@@ -32,10 +32,12 @@ python soa_cli.py
 **Time**: 25-40 minutes for 43 papers
 
 **Features**:
-- ✅ Automatic PDF text extraction (using PyMuPDF)
+- ✅ Automatic PDF text extraction (PyMuPDF)
+- ✅ Smart truncation (~15-20 pages per paper, focuses on core content)
 - ✅ Thematic priming for focused extraction
 - ✅ No hallucinations (4-layer verification)
 - ✅ Full traceability (paper IDs tracked)
+- ✅ Timeout protection (30k character limit per paper)
 
 ---
 
@@ -194,9 +196,10 @@ python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted
 Edit [soa_cli.py](soa_cli.py) to adjust:
 
 ```python
-MODEL = "qwen3.5-32b"        # Your LLM model
+MODEL = None                 # Use default Qwen model (auto-detected)
 TEMPERATURE = 0.2            # Lower = more deterministic
 MAX_WORKERS = 6              # Parallel execution threads
+MAX_PDF_CHARS = 30000        # Characters per paper (~15-20 pages)
 ```
 
 For clustering, adjust in [src/similarity_cluster.py](src/similarity_cluster.py):
@@ -204,6 +207,8 @@ For clustering, adjust in [src/similarity_cluster.py](src/similarity_cluster.py)
 ```python
 n_clusters = 6               # Number of paper groups
 ```
+
+**Qwen Model**: System uses default Qwen Code model (auto-detected). If you need to specify a model, set `MODEL = "coder-model"` or your preferred model name.
 
 ## Agent Constraints (IMPORTANT)
 

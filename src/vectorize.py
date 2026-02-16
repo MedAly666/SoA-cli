@@ -62,6 +62,11 @@ def build_vector_db(extracted_files):
             print(f"[!] Error processing {f}: {e}")
             continue
     
+    if not texts:
+        print("[!] No papers to encode after processing")
+        print("[!] Check if papers passed thematic filter or if extraction format is valid")
+        raise ValueError("No papers to encode - vector DB requires at least 1 paper")
+    
     print(f"[+] Encoding {len(texts)} methodological fingerprints")
     embeddings = model.encode(texts, normalize_embeddings=True)
     
