@@ -7,7 +7,7 @@ A CLI-based multi-agent system for generating academically rigorous State of the
 ## 🚀 Quick Start
 
 ```bash
-# 1. Setup
+# 1. Setup (installs PyMuPDF for PDF processing)
 ./setup.sh
 
 # 2. Activate virtual environment (required for all commands)
@@ -20,16 +20,22 @@ python -m src.theme_builder template
 nano theme_input.json
 python -m src.theme_builder build
 
-# 4. Add your papers
+# 4. Add your papers (PDFs)
 cp /path/to/papers/*.pdf papers/
 
-# 5. Run pipeline
+# 5. Run pipeline (automatically extracts text from PDFs)
 python soa_cli.py
 
 # Output: artifacts/soa/state_of_the_art_final.tex
 ```
 
 **Time**: 25-40 minutes for 43 papers
+
+**Features**:
+- ✅ Automatic PDF text extraction (using PyMuPDF)
+- ✅ Thematic priming for focused extraction
+- ✅ No hallucinations (4-layer verification)
+- ✅ Full traceability (paper IDs tracked)
 
 ---
 
@@ -64,7 +70,8 @@ soa-cli/
     └── soa/                # ⭐ Final output here
 ```
 
----## 🔧 Installation
+---
+## 🔧 Installation
 
 **Prerequisites**:
 - Python 3.8+

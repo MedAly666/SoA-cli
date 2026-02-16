@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+import fitz  # PyMuPDF for PDF text extraction
 
 # Import core modules
 from src.vectorize import build_vector_db
@@ -47,6 +48,39 @@ MAX_WORKERS = 6  # For parallel execution
 
 
 # ========== QWEN INVOCATION ==========
+
+def extract_text_from_pdf(pdf_path):
+    """
+    Extract text from PDF using PyMuPDF.
+    
+    Args:
+        pdf_path: Path to PDF file
+        
+    Returns:
+        Extracted text as string
+        
+    Raises:
+        RuntimeError: If PDF extraction fails
+    """
+    try:
+        doc = fitz.open(pdf_path)
+        text_parts = []
+        
+        for page_num, page in enumerate(doc, start=1):
+            text = page.get_text()
+            if text.strip():
+                text_parts.append(f"### Page {page_num} ###\n{text}")
+        
+        doc.close()
+        
+        if not text_parts:
+            raise RuntimeError("No text extracted from PDF")
+        
+        return "\n\n".join(text_parts)
+        
+    except Exception as e:
+        raise RuntimeError(f"Failed to extract text from PDF: {e}")
+
 
 def run_qwen(system_prompt, input_file, output_file, model=MODEL, temperature=TEMPERATURE):
     """
@@ -192,29 +226,40 @@ def run_reader(pdf_path):
     """
     Convert PDF to structured JSON.
     
-    Note: This is a placeholder. In production, you'd use a proper PDF parser
-    like PyMuPDF, pdfplumber, or similar before calling the LLM.
+    Extracts text from PDF using PyMuPDF, then passes to LLM for structuring.
     """
     paper_id = pdf_path.stem
     output = f"artifacts/reader/{paper_id}.json"
+    temp_text_file = f"artifacts/reader/_temp_{paper_id}.txt"
     
     print(f"  [Reader] Processing {paper_id}")
     
     try:
-        # In production: extract text from PDF first
-        # For now, assuming PDF text is already available or handling is external
+        # Extract text from PDF
+        pdf_text = extract_text_from_pdf(str(pdf_path))
         
+        # Save extracted text to temporary file
+        Path(temp_text_file).parent.mkdir(parents=True, exist_ok=True)
+        with open(temp_text_file, 'w', encoding='utf-8') as f:
+            f.write(pdf_text)
+        
+        # Process with LLM
         run_qwen(
             system_prompt="prompts/reader.system.txt",
-            input_file=str(pdf_path),
+            input_file=temp_text_file,
             output_file=output
         )
+        
+        # Clean up temp file
+        Path(temp_text_file).unlink(missing_ok=True)
         
         print(f"    ✓ {paper_id}")
         return output
         
     except Exception as e:
         print(f"    ✗ {paper_id}: {e}")
+        # Clean up temp file on error
+        Path(temp_text_file).unlink(missing_ok=True)
         return None
 
 

@@ -13,9 +13,8 @@ numpy>=1.24.0
 torch>=2.0.0
 transformers>=4.30.0
 
-# Optional: PDF processing (if not using external tools)
-# PyMuPDF==1.22.5
-# pdfplumber==0.9.0
+# PDF processing
+PyMuPDF>=1.22.0
 
 # Utility
 pathlib
