@@ -3,14 +3,22 @@
 ## Initial Setup (One Time)
 
 ```bash
-# 1. Run setup script
+# 1. Run setup script (creates .venv)
 ./setup.sh
 
-# 2. Verify installation
+# 2. Activate virtual environment (ALWAYS REQUIRED)
+source .venv/bin/activate
+
+# 3. Verify installation
 python scripts/check.py
 
-# 3. Add your papers
+# 4. Add your papers
 cp /path/to/your/43/papers/*.pdf papers/
+```
+
+**Important**: Always activate the virtual environment before running any commands:
+```bash
+source .venv/bin/activate
 ```
 
 ## Running the Pipeline

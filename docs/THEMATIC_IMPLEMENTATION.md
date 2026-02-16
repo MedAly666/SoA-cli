@@ -330,6 +330,9 @@ All constraints from specification met:
 ### Quick Start
 
 ```bash
+# 0. Activate virtual environment
+source .venv/bin/activate
+
 # 1. Define scope
 python -m src.theme_builder template
 nano theme_input.json

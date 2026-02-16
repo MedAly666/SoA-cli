@@ -3,11 +3,21 @@
 ## Initial Setup (One Time)
 
 ```bash
-# 1. Setup dependencies
+# 1. Setup dependencies (creates .venv)
 ./setup.sh
 
-# 2. Verify installation
+# 2. Activate virtual environment
+source .venv/bin/activate
+# OR use convenience script:
+source activate.sh
+
+# 3. Verify installation
 python scripts/check.py
+```
+
+**Note**: Always activate the virtual environment before running:
+```bash
+source .venv/bin/activate  # OR: source activate.sh
 ```
 
 ## Define Research Scope (CRITICAL FIRST STEP)

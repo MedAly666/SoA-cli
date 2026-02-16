@@ -2,16 +2,16 @@
 # Python 3.8+
 
 # Vector database and embeddings
-faiss-cpu==1.7.4
-sentence-transformers==2.2.2
+faiss-cpu>=1.9.0
+sentence-transformers>=2.2.0
 
 # Clustering
-scikit-learn==1.3.0
-numpy==1.24.3
+scikit-learn>=1.3.0
+numpy>=1.24.0
 
 # Standard dependencies
-torch==2.0.1
-transformers==4.30.0
+torch>=2.0.0
+transformers>=4.30.0
 
 # Optional: PDF processing (if not using external tools)
 # PyMuPDF==1.22.5

@@ -24,15 +24,27 @@ if ! command -v pip3 &> /dev/null; then
 fi
 echo "    ✓ pip3 available"
 
-# Install dependencies
+# Create virtual environment
 echo ""
-echo "[3/5] Installing Python dependencies..."
-pip3 install -r requirements.txt
-echo "    ✓ Dependencies installed"
+echo "[3/5] Creating Python virtual environment (.venv)..."
+if [ -d ".venv" ]; then
+    echo "    ℹ Virtual environment already exists"
+else
+    python3 -m venv .venv
+    echo "    ✓ Virtual environment created"
+fi
+
+# Activate virtual environment and install dependencies
+echo ""
+echo "[4/5] Installing Python dependencies in virtual environment..."
+source .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+echo "    ✓ Dependencies installed in .venv"
 
 # Check Qwen CLI
 echo ""
-echo "[4/5] Checking Qwen CLI..."
+echo "[5/6] Checking Qwen CLI..."
 if ! command -v qwen &> /dev/null; then
     echo "    WARNING: qwen CLI not found"
     echo "    Please install Qwen CLI before running the pipeline"
@@ -43,7 +55,7 @@ fi
 
 # Make scripts executable
 echo ""
-echo "[5/5] Making scripts executable..."
+echo "[6/6] Making scripts executable..."
 chmod +x soa_cli.py scripts/check.py
 echo "    ✓ soa_cli.py is executable"
 echo "    ✓ scripts/check.py is executable"
@@ -53,6 +65,9 @@ echo ""
 echo "=========================================="
 echo "Setup Complete!"
 echo "=========================================="
+echo ""
+echo "⚠️  IMPORTANT: Activate the virtual environment before running:"
+echo "   source .venv/bin/activate"
 echo ""
 echo "Next steps:"
 echo ""
@@ -69,6 +84,9 @@ echo "   python soa_cli.py"
 echo ""
 echo "4. Find your State of the Art in:"
 echo "   artifacts/soa/state_of_the_art_final.tex"
+echo ""
+echo "To deactivate the virtual environment later:"
+echo "   deactivate"
 echo ""
 echo "For more information, see docs/README.md"
 echo ""

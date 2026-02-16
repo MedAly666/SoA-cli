@@ -10,15 +10,20 @@ A CLI-based multi-agent system for generating academically rigorous State of the
 # 1. Setup
 ./setup.sh
 
-# 2. Define your research scope (REQUIRED)
+# 2. Activate virtual environment (required for all commands)
+source .venv/bin/activate
+# OR use the convenience script:
+# source activate.sh
+
+# 3. Define your research scope (REQUIRED)
 python -m src.theme_builder template
 nano theme_input.json
 python -m src.theme_builder build
 
-# 3. Add your papers
+# 4. Add your papers
 cp /path/to/papers/*.pdf papers/
 
-# 4. Run pipeline
+# 5. Run pipeline
 python soa_cli.py
 
 # Output: artifacts/soa/state_of_the_art_final.tex
@@ -69,12 +74,29 @@ soa-cli/
 **Quick setup**:
 
 ```bash
-# Automated setup
+# Automated setup (creates .venv virtual environment)
 ./setup.sh
 
+# Activate the virtual environment
+source .venv/bin/activate
+
 # OR manual setup:
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 mkdir -p papers artifacts
+```
+
+**Note**: Always activate the virtual environment before running the pipeline:
+```bash
+source .venv/bin/activate
+# OR use the convenience script:
+source activate.sh
+```
+
+To deactivate when done:
+```bash
+deactivate
 ```
 
 ## 📖 Usage

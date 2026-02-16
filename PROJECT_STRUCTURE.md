@@ -10,6 +10,7 @@ soa-cli/
 ├── soa_cli.py              ⭐ MAIN ENTRY POINT
 │   └── Orchestrates entire 7-stage pipeline
 │
+├── activate.sh             🔧 Convenience script to activate .venv
 ├── README.md               Complete project overview
 ├── requirements.txt        Python dependencies
 ├── setup.sh               Automated setup script
@@ -144,8 +145,9 @@ from src import (
 
 ## Generated Files & Directories
 
-The following are created during pipeline execution:
+The following are created during setup and pipeline execution:
 
+- `.venv/` - Python virtual environment (created by setup.sh)
 - `THEMATIC_CONTRACT.json` - Global research scope (Stage 0)
 - `theme_input.json` - User input for contract builder
 - `artifacts/` - All stage outputs
@@ -230,11 +232,13 @@ python src/theme_builder.py build
 ### First Time Setup
 ```bash
 ./setup.sh
+source .venv/bin/activate  # OR: source activate.sh
 python scripts/check.py
 ```
 
 ### Define Research Scope
 ```bash
+source .venv/bin/activate  # Always activate first (OR: source activate.sh)
 python -m src.theme_builder template
 nano theme_input.json
 python -m src.theme_builder build
@@ -242,8 +246,21 @@ python -m src.theme_builder build
 
 ### Run Pipeline
 ```bash
+source .venv/bin/activate  # Always activate first (OR: source activate.sh)
 cp /path/to/papers/*.pdf papers/
 python soa_cli.py
+```
+
+### Virtual Environment Tips
+```bash
+# Activate (Method 1 - Direct)
+source .venv/bin/activate
+
+# Activate (Method 2 - Convenience script)
+source activate.sh
+
+# Deactivate when done
+deactivate
 ```
 
 ### Output Location
