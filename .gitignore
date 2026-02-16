@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Artifacts (generated during pipeline)
+artifacts/reader/*.json
+artifacts/extracted/*.json
+artifacts/extracted_filtered/*.json
+artifacts/critic/*.json
+artifacts/clusters/*.json
+artifacts/synthesis/*.json
+artifacts/soa/*.tex
+artifacts/soa/*.json
+artifacts/soa/_repair_*.json
+artifacts/soa/_writer_*.json
+
+# Vector database (generated)
+vector_db/
+memory/
+
+# Thematic contract (user-specific, regenerate as needed)
+theme_input.json
+THEMATIC_CONTRACT.json
+
+# Papers (add your own, don't commit)
+papers/*.pdf
+
+# Logs
+*.log
+
+# Temporary files
+*.tmp
+*.temp
+_*.json
+_*.txt
+
+# Keep directory structure but ignore contents
+!artifacts/.gitkeep
+!papers/.gitkeep
+!vector_db/.gitkeep
