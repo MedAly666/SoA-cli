@@ -16,5 +16,8 @@ transformers>=4.30.0
 # PDF processing
 PyMuPDF>=1.22.0
 
+# Environment variables
+python-dotenv>=1.0.0
+
 # Utility
 pathlib

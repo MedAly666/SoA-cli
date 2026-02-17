@@ -25,6 +25,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
 import fitz  # PyMuPDF for PDF text extraction
+from dotenv import load_dotenv
 
 # Import core modules
 from src.vectorize import build_vector_db
@@ -39,13 +40,21 @@ from src.theme_builder import (
     detect_theme_violation
 )
 
+# Load environment variables from .env file
+load_dotenv()
+
 
 # ========== CONFIGURATION ==========
 
-MODEL = None  # Use default Qwen model (or specify "coder-model")
-TEMPERATURE = 0.2
-MAX_WORKERS = 6  # For parallel execution
-MAX_PDF_CHARS = 30000  # Limit PDF text to ~15-20 pages to prevent timeout
+# LLM Configuration
+MODEL = os.getenv('LLM_MODEL', None)  # Use default Qwen model if not specified
+TEMPERATURE = float(os.getenv('LLM_TEMPERATURE', '0.3'))
+LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '300'))  # Timeout in seconds
+
+# Pipeline Configuration
+MAX_WORKERS = int(os.getenv('MAX_WORKERS', '10'))  # For parallel execution
+MAX_PDF_CHARS = int(os.getenv('MAX_PDF_CHARS', '30000'))  # Limit PDF text to ~15-20 pages
+CLUSTER_COUNT = int(os.getenv('CLUSTER_COUNT', '6'))  # Number of clusters for similarity clustering
 
 
 # ========== QWEN INVOCATION ==========
@@ -162,7 +171,7 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
             input=combined_prompt,
             capture_output=True,
             text=True,
-            timeout=300
+            timeout=LLM_TIMEOUT
         )
         
         if result.returncode != 0:
@@ -393,11 +402,15 @@ def run_extraction_and_critique(reader_outputs):
 
 # ========== STAGE 4: CLUSTERING ==========
 
-def run_clustering(extracted_files, critic_files, contract, n_clusters=6):
+def run_clustering(extracted_files, critic_files, contract, n_clusters=None):
     """
     Run similarity-based clustering followed by LLM interpretation.
     Applies thematic filtering before embedding.
     """
+    # Use configured cluster count if not specified
+    if n_clusters is None:
+        n_clusters = CLUSTER_COUNT
+    
     print("\n[Stage 3] Clustering Papers")
     print("="*60)
     
