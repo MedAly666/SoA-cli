@@ -64,6 +64,16 @@ papers/*.pdf
 *.temp
 _*.json
 _*.txt
+*.tex
+*.aux
+*.log
+*.out
+*.toc
+*.gz
+*.zip
+*.fls
+*.pdf
+*.fdb_latexmk
 
 # Keep directory structure but ignore contents
 !artifacts/.gitkeep
