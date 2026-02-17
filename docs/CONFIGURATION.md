@@ -25,13 +25,53 @@ SOA-CLI uses environment variables for configuration management. All configurati
 
 ### LLM Configuration
 
+#### `LLM_PROVIDER`
+- **Default:** `qwen`
+- **Description:** Choose which CLI agent to use for LLM interactions
+- **Supported Providers:**
+  - `qwen` - Qwen CLI (default)
+  - `claude` - Claude CLI (Anthropic)
+  - `gemini` - Gemini CLI (Google)
+  - `openai` - OpenAI CLI
+  - `kilo` - Kilo CLI
+  - `glm` - GLM CLI (Zhipu AI)
+- **Setup Requirements:** Install the chosen CLI tool:
+  ```bash
+  # Example installations
+  pip install qwen-cli        # For Qwen
+  npm install -g @anthropic/claude-cli  # For Claude
+  pip install google-generativeai      # For Gemini
+  pip install openai          # For OpenAI
+  ```
+
 #### `LLM_MODEL`
-- **Default:** Empty (uses default Qwen model)
-- **Description:** Specify a specific LLM model to use
-- **Examples:** 
-  - Leave empty for default Qwen model
-  - `qwen-coder` for coding-optimized model
-  - `qwen-32b` for larger model
+- **Default:** Empty (uses provider's default model)
+- **Description:** Specify a specific LLM model within the chosen provider
+- **Examples by Provider:**
+  
+  **Qwen:**
+  - Leave empty for default
+  - `qwen-coder` - Coding-optimized model
+  - `qwen-32b` - Larger model
+  
+  **Claude (Anthropic):**
+  - `claude-sonnet-4.5` - Balanced performance
+  - `claude-opus-4` - Most capable model
+  - `claude-haiku-4` - Fastest model
+  
+  **Gemini (Google):**
+  - `gemini-3-pro` - Advanced reasoning
+  - `gemini-2.5-flash` - Fast responses
+  - `gemini-ultra-2` - Most capable
+  
+  **OpenAI:**
+  - `gpt-5.2` - Latest GPT model
+  - `gpt-4.5-turbo` - Fast GPT-4
+  - `o1-mini` - Reasoning model
+  
+  **GLM (Zhipu AI):**
+  - `glm-5` - Latest model
+  - `glm-4-plus` - Enhanced model
 
 #### `LLM_TEMPERATURE`
 - **Default:** `0.3`
@@ -90,8 +130,68 @@ SOA-CLI uses environment variables for configuration management. All configurati
 
 ## Examples
 
+### Using Different LLM Providers
+
+#### Qwen (Default)
+```env
+LLM_PROVIDER=qwen
+LLM_MODEL=
+LLM_TEMPERATURE=0.3
+LLM_TIMEOUT=300
+MAX_WORKERS=10
+MAX_PDF_CHARS=30000
+CLUSTER_COUNT=6
+```
+
+#### Claude (Anthropic)
+```env
+LLM_PROVIDER=claude
+LLM_MODEL=claude-sonnet-4.5
+LLM_TEMPERATURE=0.3
+LLM_TIMEOUT=300
+MAX_WORKERS=10
+MAX_PDF_CHARS=30000
+CLUSTER_COUNT=6
+```
+
+#### Gemini (Google)
+```env
+LLM_PROVIDER=gemini
+LLM_MODEL=gemini-3-pro
+LLM_TEMPERATURE=0.3
+LLM_TIMEOUT=300
+MAX_WORKERS=10
+MAX_PDF_CHARS=30000
+CLUSTER_COUNT=6
+```
+
+#### OpenAI (GPT)
+```env
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-5.2
+LLM_TEMPERATURE=0.3
+LLM_TIMEOUT=300
+MAX_WORKERS=10
+MAX_PDF_CHARS=30000
+CLUSTER_COUNT=6
+```
+
+#### GLM (Zhipu AI)
+```env
+LLM_PROVIDER=glm
+LLM_MODEL=glm-5
+LLM_TEMPERATURE=0.2
+LLM_TIMEOUT=300
+MAX_WORKERS=10
+MAX_PDF_CHARS=30000
+CLUSTER_COUNT=6
+```
+
+### Performance-Optimized Configurations
+
 ### Fast Processing (Small Dataset)
 ```env
+LLM_PROVIDER=qwen
 LLM_MODEL=
 LLM_TEMPERATURE=0.3
 LLM_TIMEOUT=180
@@ -102,6 +202,7 @@ CLUSTER_COUNT=4
 
 ### Balanced (Default)
 ```env
+LLM_PROVIDER=qwen
 LLM_MODEL=
 LLM_TEMPERATURE=0.3
 LLM_TIMEOUT=300
@@ -112,6 +213,7 @@ CLUSTER_COUNT=6
 
 ### Thorough Analysis (Large Dataset)
 ```env
+LLM_PROVIDER=qwen
 LLM_MODEL=
 LLM_TEMPERATURE=0.2
 LLM_TIMEOUT=600
@@ -122,7 +224,8 @@ CLUSTER_COUNT=10
 
 ### High Creativity (Exploratory)
 ```env
-LLM_MODEL=
+LLM_PROVIDER=claude
+LLM_MODEL=claude-opus-4
 LLM_TEMPERATURE=0.7
 LLM_TIMEOUT=300
 MAX_WORKERS=8
@@ -164,7 +267,83 @@ CLUSTER_COUNT=6
 1. Lower `LLM_TEMPERATURE` to `0.1` or `0.2`
 2. Fix random seeds in code (advanced)
 
+### Provider Not Found
+**Problem:** Error: "Unsupported LLM provider"
+
+**Solutions:**
+1. Check `LLM_PROVIDER` is set correctly in `.env`
+2. Verify supported providers: `qwen`, `claude`, `gemini`, `openai`, `kilo`, `glm`
+3. Ensure provider CLI is installed:
+   ```bash
+   # Check if CLI is available
+   which qwen      # or claude, gemini, etc.
+   
+   # Install if missing
+   pip install qwen-cli  # or appropriate installation method
+   ```
+
+### Provider Command Fails
+**Problem:** Model errors or authentication failures
+
+**Solutions:**
+1. **Authentication:** Ensure API keys are configured
+   ```bash
+   # Claude
+   export ANTHROPIC_API_KEY=your_key
+   
+   # OpenAI
+   export OPENAI_API_KEY=your_key
+   
+   # Gemini
+   export GOOGLE_API_KEY=your_key
+   ```
+
+2. **Model Availability:** Verify model name is correct for provider
+   - Check provider documentation for available models
+   - Leave `LLM_MODEL` empty to use default
+
+3. **CLI Installation:** Verify CLI tool is properly installed
+   ```bash
+   # Test CLI directly
+   echo "Hello" | qwen -y
+   ```
+
+### Temperature Not Working
+**Problem:** Temperature setting has no effect
+
+**Solutions:**
+- **Note:** Qwen and some providers don't support temperature in their CLI
+- Switch to a provider that supports it (`claude`, `gemini`, `openai`)
+- Or modify the code to use provider's API directly
+
 ## Advanced Configuration
+
+### Adding Custom Providers
+
+To add support for a new LLM provider:
+
+1. **Add provider configuration in `soa_cli.py`:**
+   ```python
+   LLM_PROVIDERS = {
+       # ... existing providers ...
+       'your_provider': {
+           'command': 'your-cli-command',
+           'model_flag': '-m',  # or appropriate flag
+           'auto_yes': [],  # flags for auto-confirmation
+           'supports_temperature': True,
+           'temperature_flag': '--temperature',
+           'supports_system_prompt': True,
+           'input_method': 'stdin',
+           'output_method': 'stdout'
+       }
+   }
+   ```
+
+2. **Update `.env.example`** with documentation for the new provider
+
+3. **Test:** Set `LLM_PROVIDER=your_provider` in `.env` and run
+
+### Adding Custom Configuration Variables
 
 To add custom configuration variables:
 

@@ -24,6 +24,7 @@ import os
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import sys
+import argparse
 import fitz  # PyMuPDF for PDF text extraction
 from dotenv import load_dotenv
 
@@ -47,8 +48,9 @@ load_dotenv()
 # ========== CONFIGURATION ==========
 
 # LLM Configuration
-MODEL = os.getenv('LLM_MODEL', None)  # Use default Qwen model if not specified
-TEMPERATURE = float(os.getenv('LLM_TEMPERATURE', '0.3'))
+LLM_PROVIDER = os.getenv('LLM_PROVIDER', 'qwen')  # CLI provider: qwen, claude, gemini, openai, kilo, etc.
+LLM_MODEL = os.getenv('LLM_MODEL', None)  # Specific model within the provider
+LLM_TEMPERATURE = float(os.getenv('LLM_TEMPERATURE', '0.3'))
 LLM_TIMEOUT = int(os.getenv('LLM_TIMEOUT', '300'))  # Timeout in seconds
 
 # Pipeline Configuration
@@ -57,7 +59,92 @@ MAX_PDF_CHARS = int(os.getenv('MAX_PDF_CHARS', '30000'))  # Limit PDF text to ~1
 CLUSTER_COUNT = int(os.getenv('CLUSTER_COUNT', '6'))  # Number of clusters for similarity clustering
 
 
-# ========== QWEN INVOCATION ==========
+# ========== LLM PROVIDER CONFIGURATIONS ==========
+
+LLM_PROVIDERS = {
+    'qwen': {
+        'command': 'qwen',
+        'model_flag': '-m',
+        'auto_yes': ['-y'],
+        'supports_temperature': False,
+        'supports_system_prompt': True,
+        'input_method': 'stdin',
+        'output_method': 'stdout'
+    },
+    'claude': {
+        'command': 'claude',
+        'model_flag': '-m',
+        'auto_yes': [],
+        'supports_temperature': True,
+        'temperature_flag': '--temperature',
+        'supports_system_prompt': True,
+        'input_method': 'stdin',
+        'output_method': 'stdout'
+    },
+    'gemini': {
+        'command': 'gemini',
+        'model_flag': '-m',
+        'auto_yes': [],
+        'supports_temperature': True,
+        'temperature_flag': '--temperature',
+        'supports_system_prompt': True,
+        'input_method': 'stdin',
+        'output_method': 'stdout'
+    },
+    'openai': {
+        'command': 'openai',
+        'model_flag': '-m',
+        'auto_yes': [],
+        'supports_temperature': True,
+        'temperature_flag': '--temperature',
+        'supports_system_prompt': True,
+        'input_method': 'stdin',
+        'output_method': 'stdout'
+    },
+    'kilo': {
+        'command': 'kilo run',
+        'model_flag': '-m',
+        'auto_yes': ['--auto', '--format', 'json'],
+        'supports_temperature': False,
+        'supports_system_prompt': True,
+        'input_method': 'args',
+        'output_method': 'stdout'
+    },
+    'glm': {
+        'command': 'glm',
+        'model_flag': '--model',
+        'auto_yes': [],
+        'supports_temperature': True,
+        'temperature_flag': '--temperature',
+        'supports_system_prompt': True,
+        'input_method': 'stdin',
+        'output_method': 'stdout'
+    }
+}
+
+
+# ========== LLM INVOCATION ==========
+
+def get_provider_config(provider_name):
+    """
+    Get configuration for specified LLM provider.
+    
+    Args:
+        provider_name: Name of the provider (qwen, claude, gemini, etc.)
+        
+    Returns:
+        dict: Provider configuration
+        
+    Raises:
+        ValueError: If provider is not supported
+    """
+    if provider_name not in LLM_PROVIDERS:
+        available = ', '.join(LLM_PROVIDERS.keys())
+        raise ValueError(
+            f"Unsupported LLM provider: '{provider_name}'. "
+            f"Available providers: {available}"
+        )
+    return LLM_PROVIDERS[provider_name]
 
 def extract_text_from_pdf(pdf_path, max_chars=MAX_PDF_CHARS):
     """
@@ -126,20 +213,30 @@ def extract_text_from_pdf(pdf_path, max_chars=MAX_PDF_CHARS):
         raise RuntimeError(f"Failed to extract text from PDF: {e}")
 
 
-def run_qwen(system_prompt, input_file, output_file, model=MODEL, temperature=TEMPERATURE):
+def run_llm(system_prompt, input_file, output_file, provider=LLM_PROVIDER, model=LLM_MODEL, temperature=LLM_TEMPERATURE):
     """
-    Invoke Qwen CLI with specified parameters.
+    Invoke LLM CLI with specified parameters.
+    
+    This function supports multiple LLM providers (Qwen, Claude, Gemini, OpenAI, Kilo, GLM, etc.)
+    and automatically adapts to their specific CLI interfaces.
     
     Args:
         system_prompt: Path to system prompt file
         input_file: Path to input file
         output_file: Path to output file
-        model: Model name
-        temperature: Temperature setting (note: Qwen CLI may not support this directly)
+        provider: LLM provider name (qwen, claude, gemini, openai, kilo, glm, etc.)
+        model: Model name (provider-specific, e.g., 'claude-sonnet-4.5', 'gpt-5.2', 'gemini-3-pro')
+        temperature: Temperature setting (0.0-1.0, if supported by provider)
         
     Raises:
-        RuntimeError: If Qwen execution fails
+        RuntimeError: If LLM execution fails
+        ValueError: If provider is not supported
     """
+    # Get provider configuration
+    try:
+        config = get_provider_config(provider)
+    except ValueError as e:
+        raise ValueError(f"LLM provider error: {e}")
     # Load system prompt
     with open(system_prompt, 'r', encoding='utf-8') as f:
         system_text = f.read()
@@ -160,25 +257,100 @@ def run_qwen(system_prompt, input_file, output_file, model=MODEL, temperature=TE
 Generate the output as valid JSON. Return ONLY the JSON with no markdown formatting."""
     
     try:
-        # Invoke Qwen with stdin/stdout
-        if model:
-            cmd = ["qwen", "-m", model, "-y"]
+        # Build command based on provider configuration
+        if provider == 'kilo':
+            # Kilo has a special interface - needs 'kilo run' as base command
+            cmd = ['kilo', 'run']
+            
+            # Add model flag if specified (kilo uses format: kilo/provider/model)
+            if model:
+                # If user provided short form like 'glm-5', expand to full kilo format
+                if not model.startswith('kilo/'):
+                    if 'glm' in model.lower():
+                        model = f'kilo/z-ai/{model}:free'
+                    else:
+                        model = f'kilo/{model}'
+                cmd.extend(['-m', model])
+            
+            # Add auto-approval flags for non-interactive pipeline usage
+            cmd.extend(['--auto', '--format', 'json'])
+            
+            # For kilo, save prompt to temp file and use --file option
+            # This avoids command-line length limits
+            # Note: message must come BEFORE -f flag in kilo CLI
+            temp_prompt_file = f"{output_file}.prompt.txt"
+            try:
+                with open(temp_prompt_file, 'w', encoding='utf-8') as f:
+                    f.write(combined_prompt)
+                
+                # Add message first, then file attachment
+                cmd.append("Process the attached file and respond with valid JSON only.")
+                cmd.extend(['-f', temp_prompt_file])
+                
+                # Invoke Kilo with file attachment
+                result = subprocess.run(
+                    cmd,
+                    capture_output=True,
+                    text=True,
+                    timeout=LLM_TIMEOUT
+                )
+            finally:
+                # Clean up temp prompt file
+                Path(temp_prompt_file).unlink(missing_ok=True)
         else:
-            cmd = ["qwen", "-y"]  # Use default model
-        
-        result = subprocess.run(
-            cmd,
-            input=combined_prompt,
-            capture_output=True,
-            text=True,
-            timeout=LLM_TIMEOUT
-        )
+            # Standard provider interface (qwen, claude, gemini, openai, glm)
+            cmd = [config['command']]
+            
+            # Add model flag if specified
+            if model:
+                cmd.extend([config['model_flag'], model])
+            
+            # Add temperature flag if supported and specified
+            if config['supports_temperature'] and temperature is not None:
+                cmd.extend([config['temperature_flag'], str(temperature)])
+            
+            # Add auto-yes flags (for providers that need confirmation)
+            cmd.extend(config['auto_yes'])
+            
+            # Invoke LLM CLI with stdin/stdout
+            result = subprocess.run(
+                cmd,
+                input=combined_prompt,
+                capture_output=True,
+                text=True,
+                timeout=LLM_TIMEOUT
+            )
         
         if result.returncode != 0:
-            raise RuntimeError(f"Qwen failed: {result.stderr}")
+            raise RuntimeError(
+                f"{provider.upper()} CLI failed (exit code {result.returncode}): {result.stderr}"
+            )
         
         # Parse and clean output
         output_text = result.stdout.strip()
+        
+        # Special handling for Kilo's JSON event stream
+        if provider == 'kilo':
+            # Kilo returns a stream of JSON events; extract text from "text" events
+            text_chunks = []
+            for line in output_text.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                    if event.get('type') == 'text' and 'part' in event:
+                        text_content = event['part'].get('text', '')
+                        if text_content:
+                            text_chunks.append(text_content)
+                except json.JSONDecodeError:
+                    # Skip malformed JSON lines
+                    continue
+            
+            if text_chunks:
+                output_text = '\n'.join(text_chunks)
+            else:
+                raise RuntimeError(f"No text content found in Kilo response. Raw output: {output_text[:500]}")
         
         # Remove markdown code blocks if present
         if output_text.startswith("```"):
@@ -193,6 +365,15 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
                     break
             output_text = "\n".join(lines[start_idx:end_idx])
         
+        # Validate JSON before saving
+        try:
+            json.loads(output_text)  # Validate it's valid JSON
+        except json.JSONDecodeError as je:
+            raise RuntimeError(
+                f"LLM output is not valid JSON: {je}. "
+                f"Output preview: {output_text[:500]}"
+            )
+        
         # Save output
         Path(output_file).parent.mkdir(parents=True, exist_ok=True)
         with open(output_file, 'w', encoding='utf-8') as f:
@@ -201,18 +382,33 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
         return output_file
         
     except subprocess.TimeoutExpired:
-        raise RuntimeError(f"Qwen timeout for {input_file}")
+        raise RuntimeError(f"{provider.upper()} timeout after {LLM_TIMEOUT}s for {input_file}")
     except Exception as e:
-        raise RuntimeError(f"Qwen error: {e}")
+        raise RuntimeError(f"{provider.upper()} error: {e}")
 
 
-def load_json(path):
-    """Load and validate JSON file."""
+def load_json(path, skip_on_error=False):
+    """Load and validate JSON file.
+    
+    Args:
+        path: Path to JSON file
+        skip_on_error: If True, return None on error instead of raising exception
+    
+    Returns:
+        Parsed JSON data or None if skip_on_error=True and error occurs
+    """
     try:
         with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            content = f.read().strip()
+            if not content:
+                raise ValueError("File is empty")
+            return json.loads(content)
     except Exception as e:
-        raise RuntimeError(f"Failed to load JSON from {path}: {e}")
+        error_msg = f"Failed to load JSON from {path}: {e}"
+        if skip_on_error:
+            print(f"    [!] Warning: {error_msg} - Skipping this file")
+            return None
+        raise RuntimeError(error_msg)
 
 
 def save_json(data, path):
@@ -291,7 +487,7 @@ def run_reader(pdf_path):
             f.write(pdf_text)
         
         # Process with LLM
-        run_qwen(
+        run_llm(
             system_prompt="prompts/reader.system.txt",
             input_file=temp_text_file,
             output_file=output
@@ -322,7 +518,7 @@ def run_extractor(reader_json):
     print(f"  [Extractor] Processing {paper_id}")
     
     try:
-        run_qwen(
+        run_llm(
             system_prompt="prompts/extractor.system.txt",
             input_file=reader_json,
             output_file=output
@@ -348,7 +544,7 @@ def run_critic(extracted_json):
     print(f"  [Critic] Processing {paper_id}")
     
     try:
-        run_qwen(
+        run_llm(
             system_prompt="prompts/critic.system.txt",
             input_file=extracted_json,
             output_file=output
@@ -416,7 +612,14 @@ def run_clustering(extracted_files, critic_files, contract, n_clusters=None):
     
     # Load extracted papers and apply thematic filter
     print("[+] Applying thematic filter to papers")
-    extracted_data = [load_json(f) for f in extracted_files]
+    extracted_data_raw = [load_json(f, skip_on_error=True) for f in extracted_files]
+    
+    # Filter out None values (corrupted/missing files)
+    extracted_data = [data for data in extracted_data_raw if data is not None]
+    
+    if len(extracted_data) < len(extracted_files):
+        skipped = len(extracted_files) - len(extracted_data)
+        print(f"[!] Warning: Skipped {skipped} corrupted/invalid JSON files")
     
     relevant_papers = []
     filtered_out = []
@@ -470,8 +673,10 @@ def run_clustering(extracted_files, critic_files, contract, n_clusters=None):
         # Check if this critic corresponds to a relevant paper
         for i, extracted_file in enumerate(extracted_files):
             if Path(extracted_file).stem == critic_stem:
-                if extracted_data[i] in relevant_papers:
-                    critic_data.append(load_json(critic_file))
+                if i < len(extracted_data) and extracted_data[i] in relevant_papers:
+                    critic_json = load_json(critic_file, skip_on_error=True)
+                    if critic_json is not None:
+                        critic_data.append(critic_json)
                 break
     
     data = {
@@ -486,7 +691,7 @@ def run_clustering(extracted_files, critic_files, contract, n_clusters=None):
     print("[+] Running cluster interpretation agent")
     output = "artifacts/clusters/clusters.json"
     
-    run_qwen(
+    run_llm(
         system_prompt="prompts/cluster.system.txt",
         input_file=merged_input,
         output_file=output
@@ -509,7 +714,7 @@ def run_synthesis(cluster_file, extracted_files, contract):
     
     data = {
         "clusters": load_json(cluster_file),
-        "papers": [load_json(f) for f in extracted_files]
+        "papers": [p for p in [load_json(f, skip_on_error=True) for f in extracted_files] if p is not None]
     }
     
     synthesis_input = prepare_agent_input(data, contract, "artifacts/synthesis/input.json")
@@ -517,7 +722,7 @@ def run_synthesis(cluster_file, extracted_files, contract):
     output = "artifacts/synthesis/synthesis.json"
     
     print("[+] Running synthesis agent")
-    run_qwen(
+    run_llm(
         system_prompt="prompts/synthesis.system.txt",
         input_file=synthesis_input,
         output_file=output
@@ -545,7 +750,7 @@ def run_writer(synthesis_file, contract):
     output = "artifacts/soa/state_of_the_art.tex"
     
     print("[+] Running writer agent")
-    run_qwen(
+    run_llm(
         system_prompt="prompts/writer.system.txt",
         input_file=writer_input,
         output_file=output
@@ -607,9 +812,12 @@ def run_verification_and_repair(soa_file, extracted_files, critic_files):
 
 # ========== MAIN PIPELINE ==========
 
-def main():
+def main(force_reprocess=False):
     """
     Main orchestrator pipeline with thematic priming.
+    
+    Args:
+        force_reprocess: If True, re-process all papers from scratch (ignore existing artifacts)
     """
     print("\n" + "="*60)
     print("STATE OF THE ART GENERATION PIPELINE")
@@ -629,22 +837,105 @@ def main():
     existing_extracted = list(extracted_dir.glob("*.json")) if extracted_dir.exists() else []
     existing_critics = list(critic_dir.glob("*.json")) if critic_dir.exists() else []
     
-    # If we have extracted papers, skip stages 1-3
-    if existing_extracted:
+    # If force_reprocess is enabled, clear existing artifacts
+    if force_reprocess and existing_extracted:
+        print("\n[!] Force re-processing enabled: ignoring existing artifacts")
+        existing_extracted = []
+        existing_critics = []
+    
+    # Check for raw papers
+    papers_dir = Path("papers")
+    pdfs = list(papers_dir.glob("*.pdf"))
+    
+    if not pdfs:
+        print("[!] No PDF files found in papers/ directory")
+        print("[!] Please add your papers to the papers/ folder")
+        sys.exit(1)
+    
+    # Build set of paper names that have been extracted (without extension)
+    # Also validate that extracted files are valid JSON (not corrupted)
+    extracted_names = set()
+    valid_extracted = []
+    corrupted_files = []
+    
+    for f in existing_extracted:
+        try:
+            # Try to load to verify it's valid JSON
+            with open(f, 'r', encoding='utf-8') as file:
+                content = file.read().strip()
+                if content and not content.startswith("JSON output written"):
+                    json.loads(content)  # Validate JSON
+                    extracted_names.add(Path(f).stem)
+                    valid_extracted.append(f)
+                else:
+                    corrupted_files.append(Path(f).stem)
+        except (json.JSONDecodeError, ValueError):
+            corrupted_files.append(Path(f).stem)
+    
+    # Update existing_extracted to only include valid files
+    existing_extracted = valid_extracted
+    
+    # Filter critics to match valid extracted files
+    valid_critic_names = {Path(f).stem for f in existing_extracted}
+    existing_critics = [c for c in existing_critics if Path(c).stem in valid_critic_names]
+    
+    if corrupted_files:
+        print(f"\n[!] Found {len(corrupted_files)} corrupted/invalid files that will be re-extracted:")
+        for cf in corrupted_files[:5]:
+            print(f"    - {cf}")
+        if len(corrupted_files) > 5:
+            print(f"    ... and {len(corrupted_files) - 5} more")
+    
+    pdf_names = {pdf.stem for pdf in pdfs}
+    
+    # Find papers that need processing (new, failed, or corrupted)
+    missing_papers = (pdf_names - extracted_names) | set(corrupted_files)
+    
+    # Determine if we can skip stages 1-3
+    if existing_extracted and not missing_papers:
         print(f"\n[+] Found {len(existing_extracted)} existing extracted papers")
+        print(f"[+] All {len(pdfs)} papers already processed")
         print("[+] Skipping stages 1-3 (already completed)")
         extracted = existing_extracted
         critics = existing_critics
+    elif existing_extracted and missing_papers:
+        # Partial skip - process only new/missing papers
+        print(f"\n[+] Found {len(existing_extracted)} existing extracted papers")
+        print(f"[+] Found {len(missing_papers)} new/unprocessed papers: {', '.join(list(missing_papers)[:5])}{'...' if len(missing_papers) > 5 else ''}")
+        print(f"[+] Processing only new papers")
+        
+        # Filter PDFs to only process missing ones
+        pdfs_to_process = [pdf for pdf in pdfs if pdf.stem in missing_papers]
+        
+        print(f"\n[+] Processing {len(pdfs_to_process)} papers")
+        
+        # Stage 1: Reader Agent (only for new papers)
+        print("\n[Stage 1] Reading Papers (incremental)")
+        print("="*60)
+        reader_outputs = []
+        for pdf in pdfs_to_process:
+            result = run_reader(pdf)
+            if result:
+                reader_outputs.append(result)
+        
+        if not reader_outputs:
+            print("[!] No new papers were successfully read")
+            # Use existing artifacts
+            extracted = existing_extracted
+            critics = existing_critics
+        else:
+            print(f"\n[✓] Successfully read {len(reader_outputs)} new papers")
+            
+            # Stage 2+3: Extraction and Critique (parallel, only for new papers)
+            new_extracted, new_critics = run_extraction_and_critique(reader_outputs)
+            
+            # Combine with existing artifacts
+            extracted = existing_extracted + new_extracted
+            critics = existing_critics + new_critics
+            
+            print(f"\n[✓] Total papers: {len(extracted)} ({len(existing_extracted)} existing + {len(new_extracted)} new)")
     else:
-        # Check for raw papers
-        papers_dir = Path("papers")
-        pdfs = list(papers_dir.glob("*.pdf"))
-        
-        if not pdfs:
-            print("[!] No PDF files found in papers/ directory")
-            print("[!] Please add your 43 papers to the papers/ folder")
-            sys.exit(1)
-        
+        # No existing artifacts - process all papers
         print(f"\n[+] Found {len(pdfs)} papers")
         
         # Stage 1: Reader Agent
@@ -693,8 +984,27 @@ def main():
 
 
 if __name__ == "__main__":
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(
+        description="SOA-CLI: Multi-Agent State of the Art Generator",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python soa_cli.py              # Normal run (incremental processing)
+  python soa_cli.py --force      # Re-process all papers from scratch
+  python soa_cli.py --help       # Show this help message
+        """
+    )
+    parser.add_argument(
+        '--force', '-f',
+        action='store_true',
+        help='Force re-processing of all papers (ignore existing artifacts)'
+    )
+    
+    args = parser.parse_args()
+    
     try:
-        main()
+        main(force_reprocess=args.force)
     except KeyboardInterrupt:
         print("\n[!] Pipeline interrupted by user")
         sys.exit(1)

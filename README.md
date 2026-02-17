@@ -133,11 +133,47 @@ See [docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md) for detailed guide.
 
 ### Step 2: Run Complete Pipeline
 
+**Basic Usage (Incremental Processing)**:
+
 ```bash
 python soa_cli.py
 ```
 
-This will:
+The pipeline automatically handles incremental processing:
+- ✅ **New papers detected**: Only processes papers not yet extracted
+- ✅ **Corrupted files detected**: Re-processes any invalid JSON files
+- ✅ **All papers processed**: Skips to clustering if nothing new
+- ✅ **Smart resumption**: Continues from where it left off
+
+**Example scenarios**:
+```bash
+# First run: processes all 43 papers
+python soa_cli.py
+
+# Add 5 new papers to papers/ folder
+# Second run: only processes the 5 new papers
+python soa_cli.py
+
+# If extraction failed for some papers
+# Third run: re-processes only the failed papers
+python soa_cli.py
+```
+
+**Force Re-processing**:
+
+```bash
+# Re-process ALL papers from scratch (ignore existing artifacts)
+python soa_cli.py --force
+# OR
+python soa_cli.py -f
+```
+
+Use `--force` when:
+- You changed the prompts and want fresh extraction
+- You suspect extracted data is outdated
+- You want to use a different LLM model
+
+**Pipeline Stages**:
 0. Load thematic contract (or prompt you to create one)
 1. Read all PDFs from `papers/`
 2. Extract structured knowledge (theme-filtered)
@@ -249,15 +285,52 @@ Papers should be:
 - Complete (not just abstracts)
 - Readable by standard PDF parsers
 
-## Qwen CLI Integration
+## LLM Provider Integration
 
-This system assumes Qwen CLI is available:
+This system supports multiple LLM CLI providers through a unified interface:
 
-```bash
-qwen run --model <model> --system <prompt> --input <file> --output <file>
+### Supported Providers
+- **Qwen** (default) - Open-source LLM
+- **Claude** - Anthropic's Claude models (Sonnet, Opus, Haiku)
+- **Gemini** - Google's Gemini models
+- **OpenAI** - GPT models
+- **Kilo** - Kilo AI models
+- **GLM** - Zhipu AI's GLM models
+
+### Configuration
+
+Set your provider in [.env](.env):
+
+```env
+# Choose your provider
+LLM_PROVIDER=qwen  # or claude, gemini, openai, kilo, glm
+
+# Specify model (optional, uses default if empty)
+LLM_MODEL=claude-sonnet-4.5  # or gpt-5.2, gemini-3-pro, etc.
 ```
 
-If using a different LLM, modify `run_qwen()` in [soa_cli.py](soa_cli.py).
+### Requirements
+
+Install the CLI for your chosen provider:
+
+```bash
+# Qwen
+pip install qwen-cli
+
+# Claude
+npm install -g @anthropic/claude-cli
+
+# Gemini
+pip install google-generativeai
+
+# OpenAI
+pip install openai
+
+# GLM
+pip install zhipuai
+```
+
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for detailed setup instructions.
 
 ## Academic Defense
 

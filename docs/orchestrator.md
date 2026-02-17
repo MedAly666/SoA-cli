@@ -51,23 +51,51 @@ from concurrent.futures import ThreadPoolExecutor
 
 ---
 
-## Qwen Invocation Wrapper (Critical)
+## LLM Invocation Wrapper (Critical)
+
+The system supports multiple LLM providers through a unified interface:
 
 ```python
-def run_qwen(system_prompt, input_file, output_file, model="qwen3.5-32b"):
-    cmd = [
-        "qwen", "run",
-        "--model", model,
-        "--system", system_prompt,
-        "--input", input_file,
-        "--output", output_file,
-        "--temperature", "0.2"
-    ]
-
-    result = subprocess.run(cmd, capture_output=True, text=True)
-
+def run_llm(system_prompt, input_file, output_file, provider=LLM_PROVIDER, model=LLM_MODEL, temperature=LLM_TEMPERATURE):
+    """
+    Invoke LLM CLI with specified parameters.
+    
+    Supported providers: qwen, claude, gemini, openai, kilo, glm
+    """
+    # Get provider configuration
+    config = get_provider_config(provider)
+    
+    # Build command based on provider
+    cmd = [config['command']]
+    
+    if model:
+        cmd.extend([config['model_flag'], model])
+    
+    if config['supports_temperature'] and temperature is not None:
+        cmd.extend([config['temperature_flag'], str(temperature)])
+    
+    cmd.extend(config['auto_yes'])
+    
+    # Execute
+    result = subprocess.run(
+        cmd,
+        input=combined_prompt,
+        capture_output=True,
+        text=True,
+        timeout=LLM_TIMEOUT
+    )
+    
     if result.returncode != 0:
-        raise RuntimeError(result.stderr)
+        raise RuntimeError(f"{provider.upper()} CLI failed: {result.stderr}")
+```
+
+**Configuration:**
+
+Set provider in `.env`:
+```env
+LLM_PROVIDER=claude  # or qwen, gemini, openai, kilo, glm
+LLM_MODEL=claude-sonnet-4.5
+LLM_TEMPERATURE=0.3
 ```
 
 ---
@@ -89,7 +117,7 @@ def run_reader(pdf_path):
     paper_id = pdf_path.stem
     output = f"artifacts/reader/{paper_id}.json"
 
-    run_qwen(
+    run_llm(
         system_prompt="prompts/reader.system.txt",
         input_file=str(pdf_path),
         output_file=output
@@ -107,7 +135,7 @@ def run_extractor(reader_json):
     paper_id = Path(reader_json).stem
     output = f"artifacts/extracted/{paper_id}.json"
 
-    run_qwen(
+    run_llm(
         system_prompt="prompts/extractor.system.txt",
         input_file=reader_json,
         output_file=output
@@ -119,7 +147,7 @@ def run_critic(extracted_json):
     paper_id = Path(extracted_json).stem
     output = f"artifacts/critic/{paper_id}.json"
 
-    run_qwen(
+    run_llm(
         system_prompt="prompts/critic.system.txt",
         input_file=extracted_json,
         output_file=output
@@ -160,7 +188,7 @@ def run_clustering(extracted_files, critic_files):
 
     output = "artifacts/clusters/clusters.json"
 
-    run_qwen(
+    run_llm(
         system_prompt="prompts/cluster.system.txt",
         input_file=merged_input,
         output_file=output
@@ -187,7 +215,7 @@ def run_synthesis(cluster_file, extracted_files):
 
     output = "artifacts/synthesis/synthesis.json"
 
-    run_qwen(
+    run_llm(
         system_prompt="prompts/synthesis.system.txt",
         input_file=synthesis_input,
         output_file=output
@@ -204,7 +232,7 @@ def run_synthesis(cluster_file, extracted_files):
 def run_writer(synthesis_file):
     output = "artifacts/soa/state_of_the_art.tex"
 
-    run_qwen(
+    run_llm(
         system_prompt="prompts/writer.system.txt",
         input_file=synthesis_file,
         output_file=output
