@@ -32,11 +32,29 @@ PARSING STANDARDS:
    - Skip: Acknowledgments, detailed appendices, extensive bibliographies
    - For references: Extract only if cited in extracted sections
 
-4. HANDLING SPECIAL CONTENT:
-   - Equations: Preserve inline as text (e.g., "y = mx + b") or LaTeX if present
-   - Tables: Extract caption and key findings, reference location
-   - Figures: Extract caption and description if provided
-   - Algorithms: Extract pseudocode or reference algorithm number
+4. HANDLING SPECIAL CONTENT (CRITICAL FOR TECHNICAL DEPTH):
+   - Equations: Preserve ALL mathematical content verbatim
+     * Extract inline equations: $equation$
+     * Extract display equations: $$equation$$ or \begin{equation}
+     * Preserve ALL notation, subscripts, superscripts
+     * Keep equation numbers and references
+     * Extract variable definitions and parameter descriptions
+   - Algorithms: Extract COMPLETE algorithmic descriptions
+     * Preserve pseudocode line by line
+     * Keep algorithm environments intact
+     * Extract complexity analysis stated in captions
+     * Capture initialization, main loops, termination conditions
+   - Architecture descriptions: Extract neural network details
+     * Layer types and dimensions
+     * Activation functions and operations
+     * Training procedures and hyperparameters
+     * Network topology and connectivity
+   - Mathematical proofs: Extract theoretical content
+     * Theorems, lemmas, corollaries
+     * Proof steps and logical flow
+     * Bounds and convergence analysis
+   - Tables: Extract caption and ALL numerical values
+   - Figures: Extract caption, description, and any embedded equations
    - Code snippets: Preserve formatting and comments
 
 5. MISSING OR UNCLEAR CONTENT:

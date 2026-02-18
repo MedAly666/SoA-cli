@@ -44,10 +44,20 @@ EXTRACTION STANDARDS:
 
    B. METHODOLOGY:
       - Approach name and type (use authors' terminology)
-      - Mathematical formulation (preserve notation)
-      - Algorithm steps (verbatim or referenced)
-      - Implementation details (languages, libraries, hardware)
-      - Parameter settings (all values specified)
+      - Mathematical formulation (preserve ALL equations, notation, variable definitions)
+      - Complete algorithm descriptions:
+        * Algorithm pseudocode (extract verbatim if present)
+        * Step-by-step procedures with line numbers
+        * Computational complexity (time and space)
+        * Initialization procedures and stopping criteria
+      - Architecture details (for ML/AI methods):
+        * Neural network architectures (layer types, dimensions, activations)
+        * Model topology and connectivity patterns
+        * Loss functions and optimization algorithms
+        * Regularization techniques and hyperparameters
+      - Implementation details (languages, libraries, hardware, versions)
+      - Parameter settings (all values specified with ranges explored)
+      - Theoretical foundations (theorems, proofs, lemmas if provided)
 
    C. DATA AND EXPERIMENTATION:
       - Dataset name, size, characteristics
@@ -83,7 +93,60 @@ EXTRACTION STANDARDS:
    - Preserve acronyms with expansions
    - Map to standard taxonomy if authors provide it
 
-7. OUT-OF-SCOPE HANDLING:
+7. MATHEMATICAL AND ALGORITHMIC CONTENT (HIGH PRIORITY):
+   - Extract ALL mathematical equations verbatim (preserve LaTeX if present)
+     * Objective functions with all terms and coefficients
+     * Constraint equations with bounds and relationships
+     * Loss functions and cost functions
+     * Probability distributions and statistical models
+     * Matrix operations and linear algebra formulations
+     * Differential equations or recurrence relations
+   - Extract complete algorithm descriptions with all steps
+     * Pseudocode line-by-line if provided
+     * Initialization procedures and parameter values
+     * Loop structures and control flow
+     * Stopping criteria and convergence conditions
+     * Subroutines and helper functions
+   - Capture optimization problem formulations
+     * Decision variables and their domains
+     * Objective function components
+     * Equality and inequality constraints
+     * Problem complexity class (P, NP, NP-hard, convex, etc.)
+     * Solution approach (exact, approximate, heuristic)
+   - Extract neural network architectures (HIGH DETAIL)
+     * Input layer dimensions and data representation
+     * Hidden layer types (Dense, Conv, LSTM, GRU, Attention, etc.)
+     * Layer dimensions (width, height, channels, units)
+     * Activation functions per layer (ReLU, tanh, sigmoid, softmax, GELU)
+     * Normalization techniques (Batch Norm, Layer Norm, Instance Norm)
+     * Dropout rates and regularization parameters
+     * Skip connections, residual blocks, attention mechanisms
+     * Output layer structure and activation
+     * Total parameter count if provided
+   - Record complexity analysis comprehensively
+     * Time complexity (Big-O notation with explanations)
+     * Space complexity (memory requirements)
+     * Approximation ratios or performance guarantees
+     * Convergence rates and iteration counts
+     * Scalability analysis (how complexity grows with problem size)
+   - Capture mathematical proofs or theoretical analysis
+     * Theorems, lemmas, corollaries verbatim
+     * Proof sketches or main steps
+     * Optimality conditions or bounds
+     * Convergence proofs
+   - Extract training and optimization details
+     * Loss functions with mathematical formulation
+     * Optimizers (SGD, Adam, RMSprop) with learning rates
+     * Batch size, epochs, early stopping criteria
+     * Learning rate schedules and decay strategies
+     * Regularization techniques (L1, L2, dropout, weight decay)
+   - Extract evaluation metrics with definitions
+     * Accuracy, precision, recall, F1-score definitions
+     * Custom metrics with mathematical formulation
+     * Error metrics (MSE, MAE, RMSE, MAPE)
+     * Distance metrics and similarity measures
+
+8. OUT-OF-SCOPE HANDLING:
    - Explicitly flag out-of-scope sections
    - Briefly justify exclusion (e.g., "addresses hospital staffing, marked out_of_scope")
    - Do NOT extract facts from excluded sections

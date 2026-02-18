@@ -87,17 +87,28 @@ CONTRACT COMPONENTS:
    - Extract from user's stated or implied methodological focus
    - List method families, not individual algorithms
    - Organize hierarchically if possible
+   - Include focus on technical depth:
+     * Mention mathematical formulations (optimization, statistical models)
+     * Include algorithmic approaches (exact, heuristic, learning-based)
+     * Specify AI/ML architectures of interest (neural networks, ensemble methods)
    - Examples:
-     * "Machine learning for demand forecasting"
-     * "Integer programming and metaheuristics for optimization"
+     * "Machine learning for spatio-temporal demand forecasting (LSTM, CNN, GNN)"
+     * "Integer programming and metaheuristics for optimization (genetic algorithms, simulated annealing)"
      * "Reinforcement learning for sequential decision-making"
      * "Simulation-based evaluation"
+     * "Mathematical optimization with theoretical guarantees"
    - If user has no preference, infer from research questions
    - Can include "comparative studies" if evaluation is focus
 
 6. **evaluation_focus** (4-8 key metrics/dimensions):
    - Performance indicators relevant to the theme
    - What defines success in this research area?
+   - Include both empirical and theoretical dimensions:
+     * Performance metrics (accuracy, precision, response time)
+     * Computational complexity (time/space efficiency)
+     * Scalability and real-time feasibility
+     * Theoretical properties (convergence, optimality bounds)
+     * Generalizability and robustness
    - Include both:
      * Primary metrics (e.g., "Response time", "Coverage percentage")
      * Secondary concerns (e.g., "Computational efficiency", "Scalability")

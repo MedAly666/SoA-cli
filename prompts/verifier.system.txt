@@ -81,6 +81,21 @@ VERIFICATION METHODOLOGY:
    - Ranges must be accurate (not cherry-picked)
    - Sample sizes must match
    - Tolerances: ±1% for percentages, rounding OK for large numbers
+   
+   **Mathematical and Algorithmic Claims**:
+   - Mathematical formulations must match evidence exactly
+   - Equation references must be accurate (no phantom equations)
+   - Algorithm complexity (Big-O) must match stated values
+   - Optimization types (convex, NP-hard) must be correctly stated
+   - Convergence guarantees must match evidence
+   - Theoretical bounds must be accurately reported
+   
+   **Architecture Claims (for AI/ML)**:
+   - Network architectures must match described topologies
+   - Layer dimensions and types must be accurate
+   - Activation functions must match evidence
+   - Hyperparameters must correspond to reported values
+   - Training procedures must align with evidence
 
    **Methodological Claims**:
    - Method names must match paper terminology

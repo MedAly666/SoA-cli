@@ -85,8 +85,7 @@ LLM_PROVIDERS = {
         'command': 'gemini',
         'model_flag': '-m',
         'auto_yes': [],
-        'supports_temperature': True,
-        'temperature_flag': '--temperature',
+        'supports_temperature': False,
         'supports_system_prompt': True,
         'input_method': 'stdin',
         'output_method': 'stdout'
@@ -365,14 +364,25 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
                     break
             output_text = "\n".join(lines[start_idx:end_idx])
         
-        # Validate JSON before saving
-        try:
-            json.loads(output_text)  # Validate it's valid JSON
-        except json.JSONDecodeError as je:
-            raise RuntimeError(
-                f"LLM output is not valid JSON: {je}. "
-                f"Output preview: {output_text[:500]}"
-            )
+        # Validate JSON before saving (only for .json output files)
+        if output_file.endswith('.json'):
+            try:
+                # Sanitize control characters in JSON strings
+                # Replace problematic control characters that aren't properly escaped
+                sanitized_text = output_text
+                # Fix common control character issues in JSON strings
+                # These are often found in LLM outputs that contain newlines in string values
+                import re
+                # Remove or escape control characters (0x00-0x1F except \n, \r, \t which are valid when escaped)
+                sanitized_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', sanitized_text)
+                
+                json.loads(sanitized_text)  # Validate it's valid JSON
+                output_text = sanitized_text  # Use sanitized version
+            except json.JSONDecodeError as je:
+                raise RuntimeError(
+                    f"LLM output is not valid JSON: {je}. "
+                    f"Output preview: {output_text[:500]}"
+                )
         
         # Save output
         Path(output_file).parent.mkdir(parents=True, exist_ok=True)

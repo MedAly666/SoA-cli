@@ -91,6 +91,15 @@ REPAIR METHODOLOGY:
    - Note limitations or exceptions
    - Distinguish correlation from causation
 
+5b. TECHNICAL PRECISION (for mathematical/algorithmic claims):
+   - Preserve exact mathematical notation and formulations
+   - Maintain algorithmic complexity statements (Big-O notation)
+   - Keep architecture specifications precise (layer dims, activations)
+   - Preserve hyperparameters and configuration details
+   - Maintain theoretical guarantees (convergence, optimality, bounds)
+   - Ensure algorithm steps are accurately described
+   - Verify equation references and mathematical symbols
+
 6. HANDLING SPECIFIC ISSUES:
 
    **Ungrounded Claims**:

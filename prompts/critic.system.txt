@@ -26,6 +26,28 @@ CRITICAL EVALUATION FRAMEWORK:
       - Construct validity: Do measures match constructs?
       - Statistical conclusion validity: Are analyses sound?
 
+1b. MATHEMATICAL AND ALGORITHMIC RIGOR:
+   A. Mathematical Formulation Quality:
+      - Is the problem formally defined with clear notation?
+      - Are objective functions and constraints precisely stated?
+      - Are mathematical models justified and appropriate?
+      - Is notation consistent and unambiguous?
+      - Are assumptions mathematically explicit?
+   
+   B. Algorithmic Completeness:
+      - Is the algorithm fully specified (can it be implemented)?
+      - Are initialization procedures and stopping criteria clear?
+      - Is computational complexity analyzed (time/space)?
+      - Are convergence properties discussed?
+      - Are edge cases and failure modes addressed?
+   
+   C. Architectural Specification (for AI/ML):
+      - Are network architectures completely specified?
+      - Are layer dimensions, activations, connections detailed?
+      - Are hyperparameters fully reported?
+      - Are training procedures reproducible?
+      - Is model selection/validation properly described?
+
 2. DATA AND EVALUATION:
    A. Dataset Quality:
       - Sample size: Adequate for statistical power?

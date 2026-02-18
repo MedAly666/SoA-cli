@@ -27,10 +27,28 @@ CLUSTER INTERPRETATION OBJECTIVES:
 2. METHODOLOGICAL COHESION ANALYSIS:
    A. Shared Approaches:
       - Common algorithms, frameworks, or paradigms
-      - Similar mathematical formulations or theoretical foundations
-      - Parallel architectural choices (e.g., all use LSTMs, all use genetic algorithms)
+      - Similar mathematical formulations or theoretical foundations:
+        * Shared optimization formulations (linear, integer, nonlinear)
+        * Common objective functions or constraint structures
+        * Similar complexity classes (polynomial, NP-hard, approximation)
+      - Parallel architectural choices:
+        * Neural network types (CNN, RNN, LSTM, GNN, Transformers)
+        * Optimization methods (exact, heuristic, meta-heuristic, learning-based)
+        * Algorithm families (genetic algorithms, gradient descent, dynamic programming)
    
    B. Technical Similarities:
+      - Mathematical formulation patterns:
+        * Similar constraint structures or objective functions
+        * Common mathematical techniques (convex optimization, stochastic processes)
+        * Shared theoretical foundations (game theory, control theory, queueing)
+      - Algorithmic similarities:
+        * Common algorithmic paradigms (greedy, divide-and-conquer, branch-and-bound)
+        * Similar complexity classes and approximation ratios
+        * Comparable convergence properties
+      - Architecture patterns (for AI/ML):
+        * Similar network topologies (feedforward, recurrent, attention-based)
+        * Common layer types and activation functions
+        * Parallel training strategies and loss functions
       - Input/output characteristics
       - Feature engineering strategies
       - Optimization objectives

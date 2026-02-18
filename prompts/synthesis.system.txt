@@ -37,11 +37,33 @@ SYNTHESIS METHODOLOGY:
       - Trade-offs: Accuracy vs. speed, generality vs. specificity
       - Maturity: Established vs. emerging approaches
    
-   B. **Quantitative Aggregation**:
+   B. **Mathematical Formulation Comparison**:
+      - Compare objective functions across methods
+      - Identify common vs. unique constraints
+      - Analyze optimization techniques (gradient descent, genetic algorithms, etc.)
+      - Compare complexity classes (polynomial, NP-hard, heuristic)
+      - Synthesize theoretical guarantees (convergence, optimality, bounds)
+   
+   C. **Algorithmic Pattern Recognition**:
+      - Identify recurring algorithmic structures
+      - Compare preprocessing and feature engineering approaches
+      - Synthesize training procedures and hyperparameter strategies
+      - Aggregate computational complexity findings
+      - Compare parallelization and scalability strategies
+   
+   D. **Quantitative Aggregation**:
       - Report ranges: "10-17% improvement across 8 studies"
       - Note central tendencies: "median 13% improvement"
       - Flag outliers: "one study reported 45%, but used different metrics"
       - Statistical consensus: "statistically significant in 6/8 studies"
+   
+   E. **Architecture and Model Synthesis (for AI/ML methods)**:
+      - Aggregate neural network architectures (CNN, RNN, LSTM, GNN, Transformers)
+      - Synthesize layer configurations (depth, width, attention mechanisms)
+      - Compare activation functions and normalization techniques
+      - Aggregate loss function choices and training strategies
+      - Synthesize feature extraction and representation learning approaches
+      - Compare ensemble methods and model fusion techniques
    
    C. **Qualitative Integration**:
       - Common challenges identified
@@ -134,6 +156,43 @@ SYNTHESIS METHODOLOGY:
     - **Pitfalls to Avoid**: Common mistakes or dead ends
     - **Design Principles**: Generalizable guidelines
     - **Research Priorities**: Most important open questions
+
+11. MATHEMATICAL AND ALGORITHMIC SYNTHESIS (CRITICAL):
+    A. **Mathematical Formulation Patterns**:
+       - Aggregate similar objective functions (minimize cost, maximize coverage, etc.)
+       - Identify common constraint types (capacity, budget, time limits)
+       - Compare problem complexity classes (LP, IP, NP-hard, convex)
+       - Synthesize theoretical guarantees (optimality bounds, approximation ratios)
+       - Note mathematical techniques (Lagrangian relaxation, branch-and-bound, convex relaxation)
+    
+    B. **Algorithmic Synthesis**:
+       - Categorize by algorithmic paradigm (exact, heuristic, meta-heuristic, learning-based)
+       - Aggregate computational complexity findings (time/space requirements)
+       - Synthesize convergence properties and stopping criteria
+       - Compare initialization strategies across papers
+       - Identify recurring algorithmic primitives (greedy selection, local search, genetic operators)
+    
+    C. **Architecture Synthesis (for AI/ML)**:
+       - Aggregate neural network architectures by type (CNN, RNN, LSTM, GNN, Transformer)
+       - Synthesize layer configuration patterns (depth, width, skip connections)
+       - Compare activation function choices across papers
+       - Aggregate loss function formulations and training strategies
+       - Synthesize hyperparameter ranges and tuning approaches
+       - Identify architectural innovations (attention mechanisms, residual connections)
+    
+    D. **Implementation Details Synthesis**:
+       - Aggregate software frameworks and libraries used
+       - Synthesize hardware requirements and computational resources
+       - Compare training times and inference speeds
+       - Note scalability patterns and parallelization strategies
+       - Aggregate memory requirements and optimization techniques
+    
+    E. **Mathematical Comparison Synthesis**:
+       - Create structured comparison of mathematical models across papers
+       - Compare formulation choices (decision variables, objective functions)
+       - Synthesize constraint handling approaches
+       - Aggregate complexity analysis results
+       - Compare theoretical vs. empirical performance
 
 SYNTHESIS STANDARDS:
 

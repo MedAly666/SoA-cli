@@ -312,8 +312,8 @@ CLUSTER_COUNT=6
 **Problem:** Temperature setting has no effect
 
 **Solutions:**
-- **Note:** Qwen and some providers don't support temperature in their CLI
-- Switch to a provider that supports it (`claude`, `gemini`, `openai`)
+- **Note:** Qwen, Gemini, and Kilo don't support temperature in their CLI
+- Switch to a provider that supports it (`claude`, `openai`, `glm`)
 - Or modify the code to use provider's API directly
 
 ## Advanced Configuration

@@ -246,9 +246,9 @@ export ZHIPUAI_API_KEY=your_api_key_here
 |----------|-------|---------|------|---------|---------------------|
 | Qwen     | Fast  | Good    | Low  | 32K     | ❌ (CLI limitation) |
 | Claude   | Medium| Excellent| High| 200K+   | ✅ |
-| Gemini   | Fast  | Excellent| Low | 1M+     | ✅ |
+| Gemini   | Fast  | Excellent| Low | 1M+     | ❌ (CLI limitation) |
 | OpenAI   | Medium| Excellent| High| 128K    | ✅ |
-| Kilo     | Varies| Good    | Varies| Varies | ✅ |
+| Kilo     | Varies| Good    | Varies| Varies | ❌ (CLI limitation) |
 | GLM      | Fast  | Good    | Low  | 128K    | ✅ |
 
 ---
@@ -345,11 +345,11 @@ echo $ANTHROPIC_API_KEY
 
 ### Temperature Not Working
 
-**Note:** Some providers (like Qwen CLI) don't support temperature control through CLI
+**Note:** Some providers (Qwen, Gemini, Kilo) don't support temperature control through their CLI
 
 **Solution:**
-- Switch to a provider that supports it (Claude, Gemini, OpenAI)
-- Or accept the default behavior for Qwen
+- Switch to a provider that supports it (Claude, OpenAI, GLM)
+- Or accept the default behavior
 
 ### Rate Limiting
 
