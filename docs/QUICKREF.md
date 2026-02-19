@@ -1,9 +1,9 @@
-# Quick Reference Card - SOA-CLI with Thematic Priming
+# Quick Reference Card - SOA-CLI
 
 ## Initial Setup (One Time)
 
 ```bash
-# 1. Setup dependencies (creates .venv, installs PyMuPDF)
+# 1. Setup dependencies (creates .venv, installs LangGraph & PyMuPDF)
 ./setup.sh
 
 # 2. Activate virtual environment
@@ -12,7 +12,7 @@ source .venv/bin/activate
 source activate.sh
 
 # 3. Verify installation
-python scripts/check.py
+python3 test_langgraph.py
 ```
 
 **Note**: Always activate the virtual environment before running:
@@ -20,11 +20,17 @@ python scripts/check.py
 source .venv/bin/activate  # OR: source activate.sh
 ```
 
+**Architecture**: 
+- LangGraph-based pipeline with 11 nodes
+- Automatic checkpointing (resume from any node)
+- Type-safe state management
+- Verification gates and repair loops
+- Parallel processing for Reader, Extractor, Critic
+
 **PDF Processing**: 
-- System automatically extracts text from PDFs (using PyMuPDF)
-- Processes first ~15-20 pages (typically contains core methodology)
-- Limits to 30,000 characters to prevent timeouts
-- Full papers with appendices are intelligently truncated
+- Automatic text extraction (PyMuPDF)
+- Smart truncation (~15-20 pages per paper)
+- 30,000 character limit to prevent timeouts
 
 ## Define Research Scope (CRITICAL FIRST STEP)
 
@@ -51,15 +57,29 @@ cp /path/to/papers/*.pdf papers/
 ## Run Pipeline
 
 ```bash
-python soa_cli.py
+python3 soa_cli.py
 ```
 
-**Time**: 25-40 minutes for 43 papers
+**Options:**
+```bash
+# Custom papers directory
+python3 soa_cli.py --papers /path/to/pdfs
+
+# Adjust repair iterations
+python3 soa_cli.py --max-repair 5
+
+# Resume from checkpoint
+python3 soa_cli.py --resume --thread-id my-session
+```
+
+**Time**: 10-15 minutes for 10 papers
 
 ## Output Location
 
 ```
-artifacts/soa/state_of_the_art_final.tex
+STATE_OF_THE_ART.tex           # Final output (root)
+artifacts/final_state.json     # Complete state
+artifacts/soa/state_of_the_art.tex  # Draft LaTeX
 ```
 
 ---

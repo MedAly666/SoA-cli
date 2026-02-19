@@ -1,19 +1,19 @@
-# Quick Start Guide
+# Usage Guide - SOA-CLI
 
 ## Initial Setup (One Time)
 
 ```bash
-# 1. Run setup script (creates .venv)
+# 1. Run setup script (creates .venv, installs dependencies)
 ./setup.sh
 
 # 2. Activate virtual environment (ALWAYS REQUIRED)
 source .venv/bin/activate
 
 # 3. Verify installation
-python scripts/check.py
+python3 test_langgraph.py
 
 # 4. Add your papers
-cp /path/to/your/43/papers/*.pdf papers/
+cp /path/to/your/papers/*.pdf papers/
 ```
 
 **Important**: Always activate the virtual environment before running any commands:
@@ -26,45 +26,47 @@ source .venv/bin/activate
 ### Complete Pipeline (Recommended)
 
 ```bash
-python soa_cli.py
+python3 soa_cli.py
 ```
 
 This will:
-- Process all PDFs
-- Generate State of the Art
-- Detect and fix hallucinations
-- Output: `artifacts/soa/state_of_the_art_final.tex`
+- Process all PDFs with LangGraph orchestration
+- Generate State of the Art with automatic checkpointing
+- Detect and fix hallucinations (up to 3 repair iterations)
+- Output: `STATE_OF_THE_ART.tex`
 
-**Time**: 25-40 minutes for 43 papers
+**Time**: 10-15 minutes for 10 papers (scales with paper count)
 
 ---
 
-## Step-by-Step Execution (Advanced)
+## Advanced Options
 
-If you want more control:
-
-### Step 1: Extract and Critique
+### Custom Papers Directory
 
 ```bash
-# Process papers individually or in batches
-# (The orchestrator handles this automatically)
+python3 soa_cli.py --papers /path/to/pdfs
 ```
 
-### Step 2: Build Vector Database
+### Adjust Repair Iterations
 
 ```bash
-python -m src.vectorize artifacts/extracted/
+# Default is 3, increase for more repair attempts
+python3 soa_cli.py --max-repair 5
 ```
 
-### Step 3: Cluster Papers
+### Resume from Checkpoint
 
 ```bash
-python -m src.similarity_cluster 6  # 6 clusters (adjust as needed)
+# If pipeline was interrupted, resume where it left off
+python3 soa_cli.py --resume --thread-id my-session-id
 ```
 
-### Step 4: Run Full Pipeline from Clustering
+### Custom Thread ID
 
-Edit [soa_cli.py](../soa_cli.py) to start from a specific stage if needed.
+```bash
+# Use different thread IDs for parallel experiments
+python3 soa_cli.py --thread-id experiment-1
+```
 
 ---
 
@@ -77,16 +79,10 @@ To test with just a few papers:
 mkdir papers_test
 cp papers/P01.pdf papers/P02.pdf papers/P03.pdf papers_test/
 
-# 2. Temporarily move other papers
-mv papers papers_all
-mv papers_test papers
+# 2. Run with custom directory
+python3 soa_cli.py --papers papers_test
 
-# 3. Run pipeline
-python soa_cli.py
-
-# 4. Restore
-mv papers papers_test
-mv papers_all papers
+# Output will be in STATE_OF_THE_ART.tex
 ```
 
 ---
@@ -98,6 +94,9 @@ All intermediate outputs are saved in `artifacts/`:
 ```bash
 # Check extraction progress
 ls artifacts/extracted/*.json | wc -l
+
+# Check current state
+cat artifacts/final_state.json | jq '.pipeline_stage'
 
 # Check clustering
 cat artifacts/clusters/preclusters.json

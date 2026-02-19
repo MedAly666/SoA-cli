@@ -1,21 +1,19 @@
 # SOA-CLI: Production-Grade Multi-Agent State of the Art Generator
 
-A CLI-based multi-agent system for generating academically rigorous State of the Art sections from research papers. Built on the principles of **traceability**, **fact-grounding**, **hallucination prevention**, and **thematic priming**.
+A CLI-based multi-agent system for generating academically rigorous State of the Art sections from research papers. Built with **LangGraph** for fault-tolerant orchestration and the principles of **traceability**, **fact-grounding**, **hallucination prevention**, and **thematic priming**.
 
 ---
 
 ## 🚀 Quick Start
 
 ```bash
-# 1. Setup (installs PyMuPDF for PDF processing)
+# 1. Setup (installs dependencies including LangGraph)
 ./setup.sh
 
-# 2. Activate virtual environment (required for all commands)
+# 2. Activate virtual environment
 source .venv/bin/activate
-# OR use the convenience script:
-# source activate.sh
 
-# 3. Define your research scope (REQUIRED)
+# 3. Define your research scope
 python -m src.theme_builder template
 nano theme_input.json
 python -m src.theme_builder build
@@ -23,21 +21,29 @@ python -m src.theme_builder build
 # 4. Add your papers (PDFs)
 cp /path/to/papers/*.pdf papers/
 
-# 5. Run pipeline (automatically extracts text from PDFs)
-python soa_cli.py
+# 5. Run pipeline
+python3 soa_cli.py
 
-# Output: artifacts/soa/state_of_the_art_final.tex
+# Output: STATE_OF_THE_ART.tex
 ```
 
-**Time**: 25-40 minutes for 43 papers
+**Key Features**:
+- ✅ Fault tolerance with automatic checkpointing
+- ✅ Explicit control flow with verification gates
+- ✅ Better error handling (accumulates, doesn't crash)
+- ✅ Type-safe state management
+- ✅ Resume from any point if interrupted
 
-**Features**:
-- ✅ Automatic PDF text extraction (PyMuPDF)
-- ✅ Smart truncation (~15-20 pages per paper, focuses on core content)
-- ✅ Thematic priming for focused extraction
-- ✅ No hallucinations (4-layer verification)
-- ✅ Full traceability (paper IDs tracked)
-- ✅ Timeout protection (30k character limit per paper)
+## 📖 Documentation
+
+For detailed documentation, see the [docs/](docs/) directory:
+
+- **[docs/README.md](docs/README.md)** - Documentation index
+- **[docs/QUICKREF.md](docs/QUICKREF.md)** - Quick reference card
+- **[docs/USAGE.md](docs/USAGE.md)** - Complete usage guide
+- **[docs/LANGGRAPH_GUIDE.md](docs/LANGGRAPH_GUIDE.md)** - Architecture deep dive
+- **[docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md)** - Thematic contract system
+- **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - Environment variables
 
 ---
 
@@ -45,9 +51,52 @@ python soa_cli.py
 
 ```
 soa-cli/
-├── soa_cli.py              # ⭐ MAIN ENTRY POINT
+├── soa_cli.py              # ⭐ MAIN ENTRY POINT (LangGraph orchestration)
 ├── README.md               # This file
-├── requirements.txt        # Python dependencies
+├── requirements.txt        # Dependencies (includes LangGraph)
+├── setup.sh                # Automated setup script
+│
+├── src/                    # Core implementation
+│   ├── graph/              # LangGraph architecture
+│   │   ├── state.py        # SOAState TypedDict
+│   │   ├── nodes.py        # 11 agent nodes
+│   │   └── builder.py      # Graph construction
+│   ├── theme_builder.py    # Thematic contract system
+│   ├── vectorize.py        # FAISS embeddings
+│   ├── similarity_cluster.py  # Clustering
+│   ├── hallucination_detector.py  # Verification
+│   └── repair_loop.py      # Repair system
+│
+├── prompts/                # Agent system prompts (9 files)
+│   ├── theme_builder.system.txt
+│   ├── reader.system.txt
+│   ├── extractor.system.txt
+│   ├── critic.system.txt
+│   ├── cluster.system.txt
+│   ├── synthesis.system.txt
+│   ├── writer.system.txt
+│   ├── verifier.system.txt
+│   └── repair.system.txt
+│
+├── papers/                 # Input PDFs (add your papers here)
+├── artifacts/              # All intermediate outputs
+│   ├── reader/
+│   ├── extracted/
+│   ├── critic/
+│   ├── clusters/
+│   ├── synthesis/
+│   └── soa/
+│
+├── docs/                   # Complete documentation
+│   ├── README.md           # Docs index
+│   ├── QUICKREF.md         # Quick reference
+│   ├── USAGE.md            # Usage guide
+│   ├── LANGGRAPH_GUIDE.md  # Architecture guide
+│   └── ...                 # Additional guides
+│
+├── test_langgraph.py       # Validation tests
+└── visualize_graph.py      # Graph visualization tool
+```
 ├── setup.sh                # Setup script
 ├──── src/                    # Core modules
 │   ├── theme_builder.py    # Thematic contract (Stage 0)
@@ -73,24 +122,54 @@ soa-cli/
 ```
 
 ---
+
+## 🏗️ Architecture
+
+SOA-CLI uses **LangGraph** for production-grade orchestration:
+
+```
+11 Nodes → 13 Edges → Verification Gate → Repair Loop (max 3 iterations)
+```
+
+**Pipeline:**
+1. **Theme Builder** - Global research scope
+2. **Reader Map** (parallel) - PDF text extraction
+3. **Extractor Map** (parallel) - Fact extraction
+4. **Critic Map** (parallel) - Methodology evaluation
+5. **Vectorize** - FAISS embeddings
+6. **Cluster** - Similarity grouping
+7. **Interpret Clusters** - Thematic analysis
+8. **Synthesis** - Cross-paper reasoning
+9. **Writer** - LaTeX generation
+10. **Verifier** - Hallucination detection
+11. **Repair** (conditional) - Iterative fixes
+
+**Key Features:**
+- ✅ Automatic checkpointing (resume from any node)
+- ✅ Type-safe state (TypedDict with 18 fields)
+- ✅ Verification gates with conditional routing
+- ✅ Repair loop with max iteration guard
+- ✅ Parallel processing (Reader, Extractor, Critic)
+- ✅ Error accumulation (doesn't crash)
+
+**Performance:** ~10-15 minutes for 10 papers
+
+---
+
 ## 🔧 Installation
 
 **Prerequisites**:
 - Python 3.8+
-- Qwen CLI installed and configured
+- LLM CLI (qwen, gemini, claude, etc.)
 - Research papers in PDF format
 
-**Quick setup**:
+**Setup**:
 
 ```bash
-# Automated setup (creates .venv virtual environment)
+# Automated setup (creates .venv, installs dependencies)
 ./setup.sh
 
 # Activate the virtual environment
-source .venv/bin/activate
-
-# OR manual setup:
-python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 mkdir -p papers artifacts
@@ -112,14 +191,14 @@ deactivate
 
 ### Step 1: Define Your Research Scope (REQUIRED)
 
-Before running the pipeline, you must define your thematic scope:
+Before running the pipeline, define your thematic scope:
 
 ```bash
 # Create template
 python -m src.theme_builder template
 
 # Edit with your research focus
-vim theme_input.json
+nano theme_input.json
 
 # Build thematic contract
 python -m src.theme_builder build
@@ -127,48 +206,44 @@ python -m src.theme_builder build
 
 This creates `THEMATIC_CONTRACT.json` - the **single source of truth** that guides all agents.
 
-**Why this matters**: Without thematic priming, agents extract everything and lose focus. With it, you get 30-50% faster processing and a laser-focused SoA.
+**Why this matters**: Thematic priming ensures focused extraction and faster processing. See [docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md) for details.
 
-See [docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md) for detailed guide.
-
-### Step 2: Run Complete Pipeline
-
-**Basic Usage (Incremental Processing)**:
+### Step 2: Add Papers
 
 ```bash
-python soa_cli.py
+# Copy your PDF papers to the papers directory
+cp /path/to/papers/*.pdf papers/
 ```
 
-The pipeline automatically handles incremental processing:
-- ✅ **New papers detected**: Only processes papers not yet extracted
-- ✅ **Corrupted files detected**: Re-processes any invalid JSON files
-- ✅ **All papers processed**: Skips to clustering if nothing new
-- ✅ **Smart resumption**: Continues from where it left off
+### Step 3: Run Pipeline
 
-**Example scenarios**:
-```bash
-# First run: processes all 43 papers
-python soa_cli.py
-
-# Add 5 new papers to papers/ folder
-# Second run: only processes the 5 new papers
-python soa_cli.py
-
-# If extraction failed for some papers
-# Third run: re-processes only the failed papers
-python soa_cli.py
-```
-
-**Force Re-processing**:
+**Basic Usage**:
 
 ```bash
-# Re-process ALL papers from scratch (ignore existing artifacts)
-python soa_cli.py --force
-# OR
-python soa_cli.py -f
+python3 soa_cli.py
 ```
 
-Use `--force` when:
+The pipeline processes all papers with:
+- ✅ Automatic PDF text extraction
+- ✅ Parallel processing (Reader, Extractor, Critic)
+- ✅ Clustering and synthesis
+- ✅ LaTeX generation
+- ✅ Verification and repair (up to 3 iterations)
+
+**Output**: `STATE_OF_THE_ART.tex` in the root directory
+
+**Advanced Options**:
+
+```bash
+# Custom papers directory
+python3 soa_cli.py --papers /path/to/pdfs
+
+# Increase repair iterations
+python3 soa_cli.py --max-repair 5
+
+# Resume from checkpoint
+python3 soa_cli.py --resume --thread-id my-session
+```
 - You changed the prompts and want fresh extraction
 - You suspect extracted data is outdated
 - You want to use a different LLM model
@@ -229,7 +304,7 @@ python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted
 
 ## ⚙️ Configuration
 
-Edit [soa_cli.py](soa_cli.py) to adjust:
+Set environment variables to adjust:
 
 ```python
 MODEL = None                 # Use default Qwen model (auto-detected)

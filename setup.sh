@@ -56,9 +56,10 @@ fi
 # Make scripts executable
 echo ""
 echo "[6/6] Making scripts executable..."
-chmod +x soa_cli.py scripts/check.py
+chmod +x soa_cli.py test_langgraph.py visualize_graph.py
 echo "    ✓ soa_cli.py is executable"
-echo "    ✓ scripts/check.py is executable"
+echo "    ✓ test_langgraph.py is executable"
+echo "    ✓ visualize_graph.py is executable"
 
 # Final instructions
 echo ""
@@ -80,10 +81,13 @@ echo "2. Add your PDF papers to the papers/ directory:"
 echo "   cp /path/to/papers/*.pdf papers/"
 echo ""
 echo "3. Run the complete pipeline:"
-echo "   python soa_cli.py"
+echo "   python3 soa_cli.py"
 echo ""
 echo "4. Find your State of the Art in:"
-echo "   artifacts/soa/state_of_the_art_final.tex"
+echo "   STATE_OF_THE_ART.tex"
+echo ""
+echo "Optional: Test the installation:"
+echo "   python3 test_langgraph.py"
 echo ""
 echo "To deactivate the virtual environment later:"
 echo "   deactivate"
