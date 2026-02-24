@@ -34,6 +34,23 @@ def load_paper_paths(papers_dir: str = "papers") -> list[str]:
     return [str(p.absolute()) for p in sorted(pdf_files)]
 
 
+def clear_artifacts():
+    """Remove all artifacts to force a fresh run."""
+    import shutil
+    
+    artifacts_dir = Path("artifacts")
+    if artifacts_dir.exists():
+        print("\n[Clean] Removing existing artifacts...")
+        try:
+            shutil.rmtree(artifacts_dir)
+            print("  ✓ All artifacts cleared")
+        except Exception as e:
+            print(f"  ✗ Failed to clear artifacts: {e}")
+            raise
+    else:
+        print("\n[Clean] No artifacts to clear")
+
+
 def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, list[str]]:
     """
     Load existing artifacts and identify unprocessed papers.
@@ -312,8 +329,17 @@ def main():
         action="store_true",
         help="Resume from checkpoint"
     )
+    parser.add_argument(
+        "--clean",
+        action="store_true",
+        help="Clear all artifacts before running (forces fresh run)"
+    )
     
     args = parser.parse_args()
+    
+    # Clear artifacts if requested
+    if args.clean:
+        clear_artifacts()
     
     try:
         run_pipeline(
