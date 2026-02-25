@@ -13,6 +13,7 @@ import re
 import json
 import numpy as np
 from pathlib import Path
+from src.toon_utils import load_toon, dump_toon
 
 
 def split_into_claims(latex_text):
@@ -285,8 +286,13 @@ def run_hallucination_checks(soa_text, extracted_db, critic_db=None):
         from .vectorize import get_embedder
         
         index = faiss.read_index("vector_db/index.faiss")
-        with open("vector_db/meta.json", "r") as f:
-            meta = json.load(f)
+        # Try .toon first, fallback to .json
+        meta_file = Path("vector_db/meta.toon")
+        if meta_file.exists():
+            meta = load_toon(meta_file)
+        else:
+            with open("vector_db/meta.json", "r") as f:
+                meta = json.load(f)
         embedder = get_embedder()
     except Exception as e:
         print(f"[!] Warning: Could not load vector DB: {e}")
@@ -376,16 +382,19 @@ if __name__ == "__main__":
     # Load extracted papers
     extracted_path = Path(sys.argv[2])
     extracted_db = {}
-    for f in extracted_path.glob("*.json"):
-        with open(f, 'r', encoding='utf-8') as file:
-            data = json.load(file)
-            extracted_db[data["paper_id"]] = data
+    # Support both .toon and .json files
+    for f in list(extracted_path.glob("*.toon")) + list(extracted_path.glob("*.json")):
+        if f.suffix == '.toon':
+            data = load_toon(f)
+        else:
+            with open(f, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+        extracted_db[data["paper_id"]] = data
     
     # Run checks
     report = run_hallucination_checks(soa_text, extracted_db)
     
     # Save report
-    with open("artifacts/soa/hallucination_report.json", "w") as f:
-        json.dump(report, f, indent=2)
+    dump_toon(report, "artifacts/soa/hallucination_report.toon")
     
-    print(f"[✓] Report saved to artifacts/soa/hallucination_report.json")
+    print(f"[✓] Report saved to artifacts/soa/hallucination_report.toon")

@@ -23,5 +23,8 @@ langchain-core>=0.3.0
 # Environment variables
 python-dotenv>=1.0.0
 
+# TOON format for token-efficient LLM data
+simple-toon>=0.2.0
+
 # Utility
 pathlib

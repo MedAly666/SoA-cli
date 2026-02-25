@@ -10,6 +10,7 @@ import json
 import subprocess
 from pathlib import Path
 from .hallucination_detector import run_hallucination_checks
+from src.toon_utils import load_toon, dump_toon
 
 
 MAX_REPAIR_ITERATIONS = 3
@@ -189,10 +190,9 @@ def repair_document(soa_text, violations, extracted_db):
         ]
     }
     
-    with open("artifacts/soa/repair_failure.json", "w") as f:
-        json.dump(failure_report, f, indent=2)
+    dump_toon(failure_report, "artifacts/soa/repair_failure.toon")
     
-    print("[✓] Failure report saved to artifacts/soa/repair_failure.json")
+    print("[✓] Failure report saved to artifacts/soa/repair_failure.toon")
     
     return repaired_text, False
 
@@ -269,10 +269,14 @@ if __name__ == "__main__":
     # Load extracted papers
     extracted_path = Path(sys.argv[2])
     extracted_db = {}
-    for f in extracted_path.glob("*.json"):
-        with open(f, 'r', encoding='utf-8') as file:
-            data = json.load(file)
-            extracted_db[data["paper_id"]] = data
+    # Support both .toon and .json files
+    for f in list(extracted_path.glob("*.toon")) + list(extracted_path.glob("*.json")):
+        if f.suffix == '.toon':
+            data = load_toon(f)
+        else:
+            with open(f, 'r', encoding='utf-8') as file:
+                data = json.load(file)
+        extracted_db[data["paper_id"]] = data
     
     # Run repair pipeline
     success = repair_pipeline(sys.argv[1], extracted_db)

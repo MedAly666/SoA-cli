@@ -9,13 +9,16 @@ Each node:
 LangGraph merges the returned dict with the existing state.
 """
 
-import json
+import json  # Keep for LLM prompt formatting
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 import fitz  # PyMuPDF
 
 from .state import SOAState
+
+# Import TOON utilities for token-efficient serialization
+from src.toon_utils import dump_toon, load_toon, dumps as toon_dumps, loads as toon_loads
 
 # Import utilities from parent src package
 import sys
@@ -180,8 +183,12 @@ def theme_builder_node(state: SOAState) -> dict:
     print("\n[Node: Theme Builder]")
     try:
         # Check if contract already exists
-        if Path("THEMATIC_CONTRACT.json").exists():
+        if Path("THEMATIC_CONTRACT.toon").exists():
             print("  Loading existing contract...")
+            contract = load_toon("THEMATIC_CONTRACT.toon")
+        elif Path("THEMATIC_CONTRACT.json").exists():
+            # Legacy JSON support
+            print("  Loading existing contract (JSON)...")
             with open("THEMATIC_CONTRACT.json", 'r') as f:
                 contract = json.load(f)
         else:
@@ -229,7 +236,7 @@ def reader_map_node(state: SOAState) -> dict:
     def process_single_paper(path: str) -> tuple[str, dict]:
         """Process a single paper (called in parallel)."""
         paper_id = Path(path).stem
-        output_path = f"artifacts/reader/{paper_id}.json"
+        output_path = f"artifacts/reader/{paper_id}.toon"
         
         try:
             # Extract PDF text
@@ -251,7 +258,7 @@ def reader_map_node(state: SOAState) -> dict:
             # Clean up temp file
             Path(temp_input).unlink(missing_ok=True)
             
-            result = json.loads(output_text)
+            result = toon_loads(output_text)
             result["paper_id"] = paper_id
             
             print(f"  ✓ {paper_id}")
@@ -325,7 +332,7 @@ def extractor_map_node(state: SOAState) -> dict:
         if "error" in paper_data:
             return paper_id, paper_data
         
-        output_path = f"artifacts/extracted/{paper_id}.json"
+        output_path = f"artifacts/extracted/{paper_id}.toon"
         
         try:
             # Inject thematic contract
@@ -347,7 +354,7 @@ def extractor_map_node(state: SOAState) -> dict:
             # Clean up temp file
             Path(input_path).unlink(missing_ok=True)
             
-            result = json.loads(output_text)
+            result = toon_loads(output_text)
             result["paper_id"] = paper_id
             
             print(f"  ✓ {paper_id}")
@@ -420,7 +427,7 @@ def critic_map_node(state: SOAState) -> dict:
         if "error" in paper_data:
             return paper_id, paper_data
         
-        output_path = f"artifacts/critic/{paper_id}.json"
+        output_path = f"artifacts/critic/{paper_id}.toon"
         
         try:
             # Prepare input
@@ -439,7 +446,7 @@ def critic_map_node(state: SOAState) -> dict:
             # Clean up temp file
             Path(input_path).unlink(missing_ok=True)
             
-            result = json.loads(output_text)
+            result = toon_loads(output_text)
             result["paper_id"] = paper_id
             
             print(f"  ✓ {paper_id}")
@@ -600,10 +607,10 @@ def interpret_clusters_node(state: SOAState) -> dict:
         output_text = call_llm(
             "prompts/cluster.system.txt",
             agent_input,
-            "artifacts/clusters/clusters.json"
+            "artifacts/clusters/clusters.toon"
         )
         
-        result = json.loads(output_text)
+        result = toon_loads(output_text)
         
         print(f"  ✓ Interpreted clusters")
         
@@ -656,10 +663,10 @@ def synthesis_node(state: SOAState) -> dict:
         output_text = call_llm(
             "prompts/synthesis.system.txt",
             agent_input,
-            "artifacts/synthesis/synthesis.json"
+            "artifacts/synthesis/synthesis.toon"
         )
         
-        result = json.loads(output_text)
+        result = toon_loads(output_text)
         
         print(f"  ✓ Synthesis complete")
         

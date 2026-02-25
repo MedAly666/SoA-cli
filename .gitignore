@@ -34,17 +34,30 @@ wheels/
 
 # Artifacts (generated during pipeline)
 artifacts/reader/*.json
+artifacts/reader/*.toon
 artifacts/reader/_temp_*.txt
+
 artifacts/extracted/*.json
+artifacts/extracted/*.toon
+
 artifacts/extracted_filtered/*.json
+artifacts/extracted_filtered/*.toon
+
 artifacts/critic/*.json
+artifacts/critic/*.toon
+
 artifacts/clusters/*.json
+artifacts/clusters/*.toon
+
 artifacts/synthesis/*.json
+artifacts/synthesis/*.toon
+
 artifacts/soa/*.tex
 artifacts/soa/*.json
 artifacts/soa/_repair_*.json
 artifacts/soa/_writer_*.json
 artifacts/*_state.json
+artifacts/*_state.toon
 
 # Vector database (generated)
 vector_db/
@@ -67,6 +80,7 @@ papers/*.pdf
 *.tmp
 *.temp
 _*.json
+_*.toon
 _*.txt
 *.tex
 *.aux

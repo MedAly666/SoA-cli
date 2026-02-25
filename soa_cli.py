@@ -8,7 +8,7 @@ Automatically generates academically rigorous State of the Art sections from res
 
 import os
 import sys
-import json
+import json  # Keep for state serialization compatibility
 from pathlib import Path
 from typing import Optional
 from dotenv import load_dotenv
@@ -18,6 +18,7 @@ load_dotenv()
 
 from src.graph.builder import compile_graph
 from src.graph.state import SOAState
+from src.toon_utils import load_toon, dump_toon
 
 
 def load_paper_paths(papers_dir: str = "papers") -> list[str]:
@@ -69,17 +70,28 @@ def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, l
     for path in paper_paths:
         paper_id = Path(path).stem
         
-        # Check for existing artifacts
-        reader_file = Path(f"artifacts/reader/{paper_id}.json")
-        extracted_file = Path(f"artifacts/extracted/{paper_id}.json")
-        critic_file = Path(f"artifacts/critic/{paper_id}.json")
+        # Check for existing artifacts (prefer .toon, fallback to .json)
+        reader_file = Path(f"artifacts/reader/{paper_id}.toon")
+        if not reader_file.exists():
+            reader_file = Path(f"artifacts/reader/{paper_id}.json")
+            
+        extracted_file = Path(f"artifacts/extracted/{paper_id}.toon")
+        if not extracted_file.exists():
+            extracted_file = Path(f"artifacts/extracted/{paper_id}.json")
+            
+        critic_file = Path(f"artifacts/critic/{paper_id}.toon")
+        if not critic_file.exists():
+            critic_file = Path(f"artifacts/critic/{paper_id}.json")
         
         # Load reader output if exists
         if reader_file.exists():
             try:
-                with open(reader_file, 'r', encoding='utf-8') as f:
-                    reader_outputs[paper_id] = json.load(f)
-            except (json.JSONDecodeError, IOError):
+                if reader_file.suffix == '.toon':
+                    reader_outputs[paper_id] = load_toon(reader_file)
+                else:
+                    with open(reader_file, 'r', encoding='utf-8') as f:
+                        reader_outputs[paper_id] = json.load(f)
+            except (json.JSONDecodeError, IOError, Exception) as e:
                 print(f"  ⚠ Corrupted reader output for {paper_id}, will reprocess")
                 unprocessed_paths.append(path)
                 continue
@@ -90,9 +102,12 @@ def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, l
         # Load extracted facts if exists
         if extracted_file.exists():
             try:
-                with open(extracted_file, 'r', encoding='utf-8') as f:
-                    extracted_facts[paper_id] = json.load(f)
-            except (json.JSONDecodeError, IOError):
+                if extracted_file.suffix == '.toon':
+                    extracted_facts[paper_id] = load_toon(extracted_file)
+                else:
+                    with open(extracted_file, 'r', encoding='utf-8') as f:
+                        extracted_facts[paper_id] = json.load(f)
+            except (json.JSONDecodeError, IOError, Exception) as e:
                 print(f"  ⚠ Corrupted extracted output for {paper_id}, will reprocess")
                 if path not in unprocessed_paths:
                     unprocessed_paths.append(path)
@@ -105,9 +120,12 @@ def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, l
         # Load critic assessment if exists
         if critic_file.exists():
             try:
-                with open(critic_file, 'r', encoding='utf-8') as f:
-                    critic_assessments[paper_id] = json.load(f)
-            except (json.JSONDecodeError, IOError):
+                if critic_file.suffix == '.toon':
+                    critic_assessments[paper_id] = load_toon(critic_file)
+                else:
+                    with open(critic_file, 'r', encoding='utf-8') as f:
+                        critic_assessments[paper_id] = json.load(f)
+            except (json.JSONDecodeError, IOError, Exception) as e:
                 print(f"  ⚠ Corrupted critic output for {paper_id}, will reprocess")
                 if path not in unprocessed_paths:
                     unprocessed_paths.append(path)
@@ -236,8 +254,8 @@ def run_pipeline(
         )
         
         # Save initial state
-        with open("artifacts/initial_state.json", 'w') as f:
-            json.dump({k: v for k, v in initial_state.items() if v is not None and k != 'embeddings'}, f, indent=2)
+        serializable_initial = {k: v for k, v in initial_state.items() if v is not None and k != 'embeddings'}
+        dump_toon(serializable_initial, "artifacts/initial_state.toon")
     else:
         print("\n[Setup] Resuming from checkpoint...")
         initial_state = None  # Will load from checkpoint
@@ -268,14 +286,13 @@ def run_pipeline(
     print(f"Repair iterations: {final_state.get('repair_iteration', 0)}/{final_state.get('max_repair_iterations', 0)}")
     
     # Save final state
-    output_file = "artifacts/final_state.json"
-    with open(output_file, 'w', encoding='utf-8') as f:
-        # Only save serializable parts
-        serializable_state = {
-            k: v for k, v in final_state.items()
-            if k not in ['embeddings'] and v is not None
-        }
-        json.dump(serializable_state, f, indent=2)
+    output_file = "artifacts/final_state.toon"
+    # Only save serializable parts
+    serializable_state = {
+        k: v for k, v in final_state.items()
+        if k not in ['embeddings'] and v is not None
+    }
+    dump_toon(serializable_state, output_file)
     
     print(f"\n✓ Final state saved to {output_file}")
     

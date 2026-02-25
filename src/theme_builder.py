@@ -10,9 +10,10 @@ to focus only on globally relevant information.
 import json
 import subprocess
 from pathlib import Path
+from src.toon_utils import dump_toon, load_toon, loads as toon_loads
 
 
-THEME_CONTRACT_FILE = "THEMATIC_CONTRACT.json"
+THEME_CONTRACT_FILE = "THEMATIC_CONTRACT.toon"
 
 
 def build_thematic_contract(user_input_file="theme_input.json", model=None):
@@ -115,7 +116,7 @@ Generate a thematic contract based on the above input. Return ONLY valid JSON wi
         if json_start >= 0 and json_end > json_start:
             output_text = output_text[json_start:json_end]
         
-        contract = json.loads(output_text)
+        contract = toon_loads(output_text)
         
         # Validate contract structure
         required_fields = [
@@ -132,8 +133,7 @@ Generate a thematic contract based on the above input. Return ONLY valid JSON wi
                 raise ValueError(f"Theme contract missing required field: {field}")
         
         # Save final contract
-        with open(output_file, 'w', encoding='utf-8') as f:
-            json.dump(contract, f, indent=2)
+        dump_toon(contract, output_file)
         
         print(f"[✓] Thematic contract created: {output_file}")
         print(f"\n[Theme] {contract['global_theme']}")
@@ -160,10 +160,18 @@ def load_thematic_contract(contract_file=THEME_CONTRACT_FILE):
         Dictionary containing the thematic contract
     """
     if not Path(contract_file).exists():
-        raise RuntimeError(f"Thematic contract not found: {contract_file}")
+        # Try fallback to .json for backward compatibility
+        json_file = contract_file.replace('.toon', '.json')
+        if Path(json_file).exists():
+            contract_file = json_file
+        else:
+            raise RuntimeError(f"Thematic contract not found: {contract_file}")
     
-    with open(contract_file, 'r', encoding='utf-8') as f:
-        return json.load(f)
+    if contract_file.endswith('.toon'):
+        return load_toon(contract_file)
+    else:
+        with open(contract_file, 'r', encoding='utf-8') as f:
+            return json.load(f)
 
 
 def create_theme_input_template(output_file="theme_input.json"):

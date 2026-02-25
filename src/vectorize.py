@@ -8,6 +8,7 @@ import faiss
 import json
 import numpy as np
 from pathlib import Path
+from src.toon_utils import load_toon, dump_toon
 
 MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -54,10 +55,15 @@ def build_vector_db(extracted_files):
     print(f"[+] Processing {len(extracted_files)} papers")
     for f in extracted_files:
         try:
-            with open(f, 'r', encoding='utf-8') as file:
-                paper = json.load(file)
-                texts.append(build_embedding_text(paper))
-                meta.append({"paper_id": paper["paper_id"]})
+            # Support both .toon and .json files
+            if f.suffix == '.toon':
+                paper = load_toon(f)
+            else:
+                with open(f, 'r', encoding='utf-8') as file:
+                    paper = json.load(file)
+            
+            texts.append(build_embedding_text(paper))
+            meta.append({"paper_id": paper["paper_id"]})
         except Exception as e:
             print(f"[!] Error processing {f}: {e}")
             continue
@@ -79,8 +85,7 @@ def build_vector_db(extracted_files):
     Path("vector_db").mkdir(exist_ok=True)
     
     faiss.write_index(index, "vector_db/index.faiss")
-    with open("vector_db/meta.json", "w", encoding='utf-8') as f:
-        json.dump(meta, f, indent=2)
+    dump_toon(meta, "vector_db/meta.toon")
     
     print(f"[✓] Vector DB built: {index.ntotal} papers indexed")
     print(f"[✓] Saved to vector_db/index.faiss")
@@ -94,8 +99,15 @@ def get_embedder():
 def load_vector_db():
     """Load the FAISS index and metadata from disk."""
     index = faiss.read_index("vector_db/index.faiss")
-    with open("vector_db/meta.json", "r", encoding='utf-8') as f:
-        meta = json.load(f)
+    
+    # Try .toon first, fallback to .json
+    meta_file = Path("vector_db/meta.toon")
+    if meta_file.exists():
+        meta = load_toon(meta_file)
+    else:
+        with open("vector_db/meta.json", "r", encoding='utf-8') as f:
+            meta = json.load(f)
+    
     return index, meta
 
 
@@ -104,7 +116,8 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
         extracted_path = Path(sys.argv[1])
-        files = list(extracted_path.glob("*.json"))
+        # Support both .toon and .json files
+        files = list(extracted_path.glob("*.toon")) + list(extracted_path.glob("*.json"))
         build_vector_db(files)
     else:
         print("Usage: python vectorize.py <path_to_extracted_folder>")

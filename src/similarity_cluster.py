@@ -9,6 +9,7 @@ import json
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
 from pathlib import Path
+from src.toon_utils import load_toon, dump_toon
 
 
 def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/preclusters.json"):
@@ -28,8 +29,13 @@ def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/prec
     print(f"[+] Loading vector database")
     index = faiss.read_index("vector_db/index.faiss")
     
-    with open("vector_db/meta.json", "r", encoding='utf-8') as f:
-        meta = json.load(f)
+    # Try .toon first, fallback to .json
+    meta_file = Path("vector_db/meta.toon")
+    if meta_file.exists():
+        meta = load_toon(meta_file)
+    else:
+        with open("vector_db/meta.json", "r", encoding='utf-8') as f:
+            meta = json.load(f)
     
     print(f"[+] Reconstructing vectors from FAISS index")
     vectors = np.zeros((index.ntotal, index.d), dtype='float32')
@@ -55,8 +61,10 @@ def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/prec
     
     # Save to disk
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
-    with open(output_file, "w", encoding='utf-8') as f:
-        json.dump(clusters, f, indent=2)
+    # Change extension to .toon if it was .json
+    if output_file.endswith('.json'):
+        output_file = output_file.replace('.json', '.toon')
+    dump_toon(clusters, output_file)
     
     print(f"[✓] Clustered {len(meta)} papers into {len(clusters)} clusters")
     for cid, papers in clusters.items():
