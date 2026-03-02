@@ -8,7 +8,7 @@ to focus only on globally relevant information.
 """
 
 import json
-import subprocess
+import os
 from pathlib import Path
 from src.toon_utils import dump_toon, load_toon, loads as toon_loads
 
@@ -58,11 +58,9 @@ def build_thematic_contract(user_input_file="theme_input.json", model=None):
     with open(system_prompt_path, 'r', encoding='utf-8') as f:
         system_prompt = f.read()
     
-    # Construct combined prompt for Qwen
+    # Prepare user prompt
     user_input_json = json.dumps(user_input, indent=2)
-    combined_prompt = f"""{system_prompt}
-
-# Input
+    user_prompt = f"""# Input
 
 ```json
 {user_input_json}
@@ -74,27 +72,26 @@ Generate a thematic contract based on the above input. Return ONLY valid JSON wi
     output_file = THEME_CONTRACT_FILE
     
     try:
-        print(f"[+] Generating thematic contract with Qwen...")
+        print(f"[+] Generating thematic contract with LLM SDK...")
         
-        # Invoke Qwen with stdin/stdout
-        if model:
-            cmd = ["qwen", "-m", model, "-y"]
-        else:
-            cmd = ["qwen", "-y"]  # Use default model
+        # Use LLM client instead of subprocess
+        from src.llm_client import LLMClient
         
-        result = subprocess.run(
-            cmd,
-            input=combined_prompt,
-            capture_output=True,
-            text=True,
-            timeout=120
+        client = LLMClient(
+            provider=os.getenv('LLM_PROVIDER', 'qwen'),
+            model=model,
+            timeout=120,
+            max_retries=3
         )
         
-        if result.returncode != 0:
-            raise RuntimeError(f"Theme builder failed: {result.stderr}")
+        output_text = client.call(
+            system=system_prompt,
+            user=user_prompt,
+            temperature=0.1,
+            max_tokens=4096
+        )
         
-        # Parse JSON from output
-        output_text = result.stdout.strip()
+        output_text = output_text.strip()
         
         # Remove markdown code blocks if present
         if output_text.startswith("```"):
@@ -144,8 +141,8 @@ Generate a thematic contract based on the above input. Return ONLY valid JSON wi
         return contract
         
     except json.JSONDecodeError as e:
-        print(f"[!] Failed to parse JSON from Qwen output: {e}")
-        print(f"[!] Raw output: {result.stdout[:500]}")
+        print(f"[!] Failed to parse JSON from LLM output: {e}")
+        print(f"[!] Raw output: {output_text[:500]}")
         raise
     except Exception as e:
         print(f"[!] Error building thematic contract: {e}")

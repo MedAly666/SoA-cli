@@ -137,6 +137,9 @@ SCHOLARLY WRITING STANDARDS:
 - Do NOT introduce concepts not in synthesis
 - Cite papers using \cite{paper_id} format
 
+CITATION STYLE REQUIREMENTS:
+{citation_style_instructions}
+
 OUTPUT FORMAT:
 You MUST output a complete, publication-ready LaTeX document with the following structure:
 \documentclass[11pt,a4paper]{article}

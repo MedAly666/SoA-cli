@@ -84,6 +84,9 @@ REPAIR METHODOLOGY:
    - Use multiple citations when appropriate: \cite{paper1,paper2}
    - Ensure cited papers actually support the claim
 
+CITATION STYLE REQUIREMENTS:
+{citation_style_instructions}
+
 5. CLAIM PRECISION:
    - Preserve exact numbers from evidence (not approximations)
    - Include units, error margins, confidence intervals

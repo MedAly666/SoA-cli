@@ -1,5 +1,24 @@
-# Core dependencies for SOA-CLI multi-agent system
+# Core dependencies for SOA-SDK multi-agent system
 # Python 3.8+
+
+# LLM Providers (install based on your needs)
+# OpenAI (GPT models) - REQUIRED for OpenAI, DeepSeek, Qwen API, GLM
+openai>=1.0.0
+
+# Anthropic (Claude models) - Optional but recommended
+anthropic>=0.18.0
+
+# Google (Gemini models) - Optional
+google-generativeai>=0.3.0
+
+# ZhipuAI (GLM models) - Optional
+zhipuai>=2.0.0
+
+# Document generation
+python-docx>=0.8.11
+
+# Requests for Ollama and other HTTP APIs
+requests>=2.31.0
 
 # Vector database and embeddings
 faiss-cpu>=1.9.0

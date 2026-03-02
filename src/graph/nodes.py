@@ -10,6 +10,7 @@ LangGraph merges the returned dict with the existing state.
 """
 
 import json  # Keep for LLM prompt formatting
+import logging
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -29,6 +30,9 @@ from theme_builder import build_thematic_contract, inject_theme_into_input
 from vectorize import build_vector_db
 from similarity_cluster import run_similarity_clustering
 
+# Get logger
+logger = logging.getLogger('SOA-CLI.Nodes')
+
 
 def inject_contract(data: dict, contract: dict) -> dict:
     """
@@ -38,11 +42,135 @@ def inject_contract(data: dict, contract: dict) -> dict:
     return inject_theme_into_input(data, contract)
 
 
-def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> str:
-    """Extract text from PDF using PyMuPDF."""
+def _detect_sections(text: str) -> dict:
+    """
+    Detect common paper sections using keyword matching.
+    
+    Returns dict with section names as keys and (start_pos, end_pos) tuples as values.
+    """
+    import re
+    
+    section_patterns = {
+        'abstract': r'\b(abstract|summary)\b',
+        'introduction': r'\b(introduction|intro|background)\b',
+        'related_work': r'\b(related work|literature review|prior work|previous work|background)\b',
+        'methodology': r'\b(method|methodology|approach|technique|algorithm|implementation)\b',
+        'results': r'\b(result|evaluation|experiment|performance|finding)\b',
+        'conclusion': r'\b(conclusion|summary|discussion|future work)\b',
+        'acknowledgements': r'\b(acknowledgement|acknowledgment|funding|support)\b',
+        'references': r'\b(reference|bibliography|citation)\b',
+        'appendix': r'\b(appendix|appendice|supplementary material)\b'
+    }
+    
+    sections = {}
+    # Search case-insensitive for section headers
+    # Look for patterns at line starts (after newline) or document start
+    for section_name, pattern in section_patterns.items():
+        # Match section headers that are likely to be at the start of a line
+        # and followed by newline or other content
+        matches = list(re.finditer(r'(?:^|\n)([^\n]*' + pattern + r'[^\n]*?)(?:\n|$)', text, re.IGNORECASE | re.MULTILINE))
+        if matches:
+            # Take the first match as the section start
+            sections[section_name] = matches[0].start()
+    
+    return sections
+
+
+def _prioritize_content(text: str, max_chars: int) -> tuple[str, bool]:
+    """
+    Intelligently truncate PDF text by prioritizing important sections.
+    
+    Priority order (keep these):
+    1. Abstract
+    2. Introduction
+    3. Related Work
+    4. Methodology
+    5. Results
+    6. Conclusion
+    
+    De-prioritize (drop first):
+    - Acknowledgements
+    - References
+    - Appendices
+    
+    Returns:
+        (truncated_text, was_truncated)
+    """
+    if len(text) <= max_chars:
+        return text, False
+    
+    sections = _detect_sections(text)
+    
+    # Define section priorities (higher = more important)
+    priority_order = [
+        'abstract',
+        'introduction', 
+        'related_work',
+        'methodology',
+        'results',
+        'conclusion'
+    ]
+    
+    # Sort sections by position in document
+    sorted_sections = sorted(sections.items(), key=lambda x: x[1])
+    
+    # Build content by priority
+    truncated_parts = []
+    current_length = 0
+    
+    # First pass: extract high-priority sections
+    for section_name in priority_order:
+        if section_name in sections:
+            section_start = sections[section_name]
+            
+            # Find the end of this section (start of next section or end of doc)
+            section_end = len(text)
+            for next_section_name, next_start in sorted_sections:
+                if next_start > section_start:
+                    section_end = next_start
+                    break
+            
+            section_text = text[section_start:section_end]
+            
+            # Add section if it fits
+            if current_length + len(section_text) <= max_chars:
+                truncated_parts.append(section_text)
+                current_length += len(section_text)
+            else:
+                # Partially include section
+                remaining = max_chars - current_length
+                if remaining > 500:  # Only add if meaningful amount left
+                    truncated_parts.append(section_text[:remaining] + "\n[Section truncated...]\n")
+                    current_length = max_chars
+                break
+    
+    # If we still have room and no sections detected, take from beginning
+    if current_length < max_chars * 0.3:  # Less than 30% extracted from sections
+        # Fallback: take first max_chars characters
+        return text[:max_chars], True
+    
+    truncated_text = "\n\n".join(truncated_parts) if truncated_parts else text[:max_chars]
+    return truncated_text, True
+
+
+def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> tuple[str, bool]:
+    """
+    Extract text from PDF using PyMuPDF with intelligent section-based truncation.
+    
+    If text exceeds max_chars, prioritizes important sections:
+    - Keeps: Abstract, Introduction, Methods, Results, Conclusion
+    - Drops first: Acknowledgements, References, Appendices
+    
+    Displays console warning when truncation occurs.
+    
+    Returns:
+        (text_with_metadata, was_truncated)
+    """
     import os
     if max_chars is None:
         max_chars = int(os.getenv('MAX_PDF_CHARS', '30000'))
+    
+    logger.debug(f"Starting PDF extraction: {Path(pdf_path).name} (max_chars={max_chars:,})")
     
     try:
         doc = fitz.open(pdf_path)
@@ -52,17 +180,14 @@ def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> str:
         total_pages = len(doc)
         max_pages = min(25, total_pages)
         
+        logger.debug(f"  Total pages: {total_pages}, extracting up to: {max_pages}")
+        
+        # Extract text from pages
         for page_num in range(max_pages):
             page = doc[page_num]
             text = page.get_text()
             
             if text.strip():
-                if total_chars + len(text) > max_chars:
-                    remaining = max_chars - total_chars
-                    if remaining > 500:
-                        text_parts.append(f"### Page {page_num + 1} (truncated) ###\n{text[:remaining]}")
-                    break
-                
                 text_parts.append(f"### Page {page_num + 1} ###\n{text}")
                 total_chars += len(text)
                 pages_extracted += 1
@@ -70,38 +195,78 @@ def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> str:
         doc.close()
         
         if not text_parts:
+            logger.error(f"No text extracted from PDF: {pdf_path}")
             raise RuntimeError("No text extracted from PDF")
         
-        result = "\n\n".join(text_parts)
-        metadata = f"[PDF: {Path(pdf_path).name}]\n"
-        metadata += f"[Extracted: {pages_extracted}/{total_pages} pages, {len(result):,} characters]\n\n"
+        full_text = "\n\n".join(text_parts)
+        original_length = len(full_text)
         
-        return metadata + result
+        logger.debug(f"  Extracted {pages_extracted} pages, {original_length:,} chars")
+        
+        # Apply smart truncation if needed
+        was_truncated = False
+        if original_length > max_chars:
+            full_text, was_truncated = _prioritize_content(full_text, max_chars)
+            
+            # Display truncation warning
+            truncated_chars = original_length - len(full_text)
+            truncation_pct = (truncated_chars / original_length) * 100
+            
+            logger.warning(f"PDF truncated: {Path(pdf_path).name}")
+            logger.warning(f"  Original: {original_length:,} chars → Truncated: {len(full_text):,} chars")
+            logger.warning(f"  Lost: {truncated_chars:,} chars ({truncation_pct:.1f}%)")
+            
+            print(f"\\n  ⚠️  WARNING: PDF truncated")
+            print(f"      File: {Path(pdf_path).name}")
+            print(f"      Original: {original_length:,} chars → Truncated: {len(full_text):,} chars")
+            print(f"      Lost: {truncated_chars:,} chars ({truncation_pct:.1f}%)")
+            print(f"      Prioritized: Abstract, Intro, Methods, Results, Conclusion")
+            print(f"      Dropped: Acknowledgements, References, Appendices (if any)")
+            print(f"      Tip: Increase MAX_PDF_CHARS in .env to retain more content\\n")
+        else:
+            logger.debug(f"  No truncation needed ({original_length:,} <= {max_chars:,})")
+        
+        # Build metadata
+        metadata = f"[PDF: {Path(pdf_path).name}]\n"
+        metadata += f"[Extracted: {pages_extracted}/{total_pages} pages, {len(full_text):,} characters"
+        if was_truncated:
+            metadata += f" (truncated from {original_length:,})"
+        metadata += "]\n\n"
+        
+        logger.debug(f"PDF extraction complete: {Path(pdf_path).name}")
+        return metadata + full_text, was_truncated
         
     except Exception as e:
+        logger.error(f"Failed to extract text from PDF: {pdf_path} - {e}")
         raise RuntimeError(f"Failed to extract text from PDF: {e}")
 
 
 def call_llm(system_prompt_path: str, input_data: dict, output_path: str) -> str:
     """
-    Call LLM via subprocess (maintains compatibility with existing CLI).
+    Call LLM via SDK with retry logic (replaces subprocess/CLI calls).
     
-    This is a wrapper around the existing run_llm function.
+    Uses the unified LLMClient which provides:
+    - Direct SDK calls to LLM providers
+    - Automatic retry with exponential backoff
+    - Better error handling
     """
     from pathlib import Path
-    import subprocess
     import os
     import re
+    from src.llm_client import LLMClient
+    from src.citation_formatter import inject_citation_style
     
     # Load system prompt
     with open(system_prompt_path, 'r', encoding='utf-8') as f:
         system_text = f.read()
     
+    # Inject citation style instructions if placeholder present
+    citation_style = os.getenv('CITATION_STYLE', 'ieee')
+    system_text = inject_citation_style(system_text, citation_style)
+    
     # Prepare input
     input_json = json.dumps(input_data, indent=2)
-    combined_prompt = f"""{system_text}
-
-# Input
+    user_prompt = f"""# Input
 
 ```json
 {input_json}
@@ -114,31 +279,37 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
     model = os.getenv('LLM_MODEL', None)
     timeout = int(os.getenv('LLM_TIMEOUT', '300'))
     
-    # Build command (simplified - uses qwen by default)
-    cmd = ['qwen']
-    if model:
-        cmd.extend(['-m', model])
-    cmd.extend(['-y'])
+    prompt_name = Path(system_prompt_path).stem  # e.g., "writer", "reader", "synthesis"
+    logger.debug(f"Calling LLM for prompt: {prompt_name}")
+    logger.debug(f"  Provider: {provider}, Model: {model or 'default'}, Timeout: {timeout}s")
+    logger.debug(f"  System prompt: {len(system_text):,} chars")
+    logger.debug(f"  User prompt: {len(user_prompt):,} chars")
+    logger.debug(f"  Citation style: {citation_style}")
     
     # Debug: log configuration (only for writer/synthesis nodes which take longest)
     if 'writer' in system_prompt_path or 'synthesis' in system_prompt_path:
         print(f"  [LLM Config] Provider: {provider}, Model: {model or 'default'}, Timeout: {timeout}s")
     
     try:
-        result = subprocess.run(
-            cmd,
-            input=combined_prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout
+        # Initialize LLM client with retry logic
+        client = LLMClient(
+            provider=provider,
+            model=model,
+            timeout=timeout,
+            max_retries=3
         )
         
-        if result.returncode != 0:
-            raise RuntimeError(f"LLM CLI failed: {result.stderr}")
+        # Call LLM via SDK (with automatic retries)
+        output_text = client.call(
+            system=system_text,
+            user=user_prompt,
+            temperature=0.1,
+            max_tokens=4096
+        )
         
-        output_text = result.stdout.strip()
+        output_text = output_text.strip()
         
-        # Remove markdown code blocks
+        # Remove markdown code blocks if present
         if output_text.startswith("```"):
             lines = output_text.split("\n")
             start_idx = 1
@@ -149,10 +320,10 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
                     break
             output_text = "\n".join(lines[start_idx:end_idx])
         
-        # Sanitize control characters
+        # Sanitize control characters for JSON outputs
         if output_path.endswith('.json'):
             output_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', output_text)
-            json.loads(output_text)  # Validate
+            json.loads(output_text)  # Validate JSON
         
         # Save output
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -161,12 +332,6 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
         
         return output_text
         
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(
-            f"LLM timeout after {timeout}s. Try increasing LLM_TIMEOUT in .env file "
-            f"(current: {timeout}s). For large synthesis/writing tasks, "
-            f"600-900 seconds may be needed."
-        )
     except Exception as e:
         raise RuntimeError(f"LLM error: {e}")
 
@@ -181,22 +346,48 @@ def theme_builder_node(state: SOAState) -> dict:
         Partial state with thematic_contract set
     """
     print("\n[Node: Theme Builder]")
+    logger.info("="*80)
+    logger.info("NODE: Theme Builder")
+    logger.info("="*80)
+    
     try:
         # Check if contract already exists
         if Path("THEMATIC_CONTRACT.toon").exists():
             print("  Loading existing contract...")
+            logger.info("Loading existing thematic contract (TOON format)")
             contract = load_toon("THEMATIC_CONTRACT.toon")
+            logger.debug(f"  Contract loaded: {len(str(contract)):,} chars")
         elif Path("THEMATIC_CONTRACT.json").exists():
             # Legacy JSON support
             print("  Loading existing contract (JSON)...")
+            logger.info("Loading existing thematic contract (legacy JSON format)")
             with open("THEMATIC_CONTRACT.json", 'r') as f:
                 contract = json.load(f)
+            logger.debug(f"  Contract loaded: {len(str(contract)):,} chars")
         else:
             print("  Building new contract...")
+            logger.info("Building new thematic contract")
             contract = build_thematic_contract()
+            logger.info("Thematic contract built successfully")
         
-        print(f"  Theme: {contract.get('global_theme', 'N/A')[:80]}...")
-        print(f"  Core questions: {len(contract.get('core_questions', []))}")
+        theme = contract.get('global_theme', 'N/A')
+        core_questions = contract.get('core_questions', [])
+        in_scope = contract.get('in_scope', [])
+        out_of_scope = contract.get('out_of_scope', [])
+        
+        print(f"  Theme: {theme[:80]}...")
+        print(f"  Core questions: {len(core_questions)}")
+        
+        logger.info(f"Thematic Contract Summary:")
+        logger.info(f"  Global Theme: {theme[:100]}...")
+        logger.info(f"  Core Questions: {len(core_questions)}")
+        logger.info(f"  In Scope Items: {len(in_scope)}")
+        logger.info(f"  Out of Scope Items: {len(out_of_scope)}")
+        
+        for i, question in enumerate(core_questions, 1):
+            logger.debug(f"  Q{i}: {question}")
+        
+        logger.info("Theme Builder completed successfully")
         
         return {
             "thematic_contract": contract,
@@ -205,6 +396,9 @@ def theme_builder_node(state: SOAState) -> dict:
         }
     except Exception as e:
         print(f"  ERROR: {e}")
+        logger.error(f"Theme Builder failed: {type(e).__name__}: {e}")
+        import traceback
+        logger.debug(f"Stack trace:\n{traceback.format_exc()}")
         return {
             "errors": [{
                 "node": "theme_builder",
@@ -240,7 +434,7 @@ def reader_map_node(state: SOAState) -> dict:
         
         try:
             # Extract PDF text
-            pdf_text = extract_pdf_text(path)
+            pdf_text, was_truncated = extract_pdf_text(path)
             
             # Save to temp file for LLM
             temp_input = f"artifacts/reader/_temp_{paper_id}.txt"
@@ -260,6 +454,7 @@ def reader_map_node(state: SOAState) -> dict:
             
             result = toon_loads(output_text)
             result["paper_id"] = paper_id
+            result["truncated"] = was_truncated  # Add truncation flag to artifact
             
             print(f"  ✓ {paper_id}")
             return paper_id, result
@@ -548,12 +743,18 @@ def cluster_node(state: SOAState) -> dict:
     
     try:
         import os
-        n_clusters = int(os.getenv('CLUSTER_COUNT', '6'))
+        # Get cluster count from environment (None means auto-detect)
+        cluster_env = os.getenv('CLUSTER_COUNT')
+        n_clusters = int(cluster_env) if cluster_env else None
         
-        print(f"  Running clustering (k={n_clusters})...")
+        if n_clusters:
+            print(f"  Running clustering (k={n_clusters}, user-specified)...")
+        else:
+            print(f"  Running clustering (auto-detecting optimal k)...")
+        
         clusters = run_similarity_clustering(n_clusters=n_clusters)
         
-        print(f"  ✓ Created {len(clusters.get('clusters', []))} clusters")
+        print(f"  ✓ Created {len(clusters)} clusters")
         
         return {
             "raw_clusters": clusters,

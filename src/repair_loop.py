@@ -7,7 +7,6 @@ Only rewrite provably broken sentences using explicit evidence.
 """
 
 import json
-import subprocess
 from pathlib import Path
 from .hallucination_detector import run_hallucination_checks
 from src.toon_utils import load_toon, dump_toon
@@ -62,6 +61,10 @@ def run_repair_agent(sentence, issue, evidence):
     Returns:
         Repaired sentence
     """
+    import os
+    from pathlib import Path
+    from src.llm_client import LLMClient
+    
     # Prepare input for repair agent
     repair_input = {
         "original_sentence": sentence,
@@ -69,33 +72,54 @@ def run_repair_agent(sentence, issue, evidence):
         "allowed_evidence": evidence
     }
     
-    # Save to temp file
-    input_file = "artifacts/soa/_repair_input.json"
-    with open(input_file, "w", encoding='utf-8') as f:
-        json.dump(repair_input, f, indent=2)
-    
-    output_file = "artifacts/soa/_repair_output.txt"
-    
     try:
-        # Call Qwen with repair prompt
-        cmd = [
-            "qwen", "run",
-            "--model", "qwen3.5-32b",
-            "--system", "prompts/repair.system.txt",
-            "--input", input_file,
-            "--output", output_file,
-            "--temperature", "0.2"
-        ]
+        # Load repair system prompt
+        system_prompt_path = Path("prompts/repair.system.txt")
+        if not system_prompt_path.exists():
+            print(f"[!] Repair system prompt not found: {system_prompt_path}")
+            return sentence
         
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        with open(system_prompt_path, 'r', encoding='utf-8') as f:
+            system_prompt = f.read()
         
-        if result.returncode != 0:
-            print(f"[!] Repair agent failed: {result.stderr}")
-            return sentence  # Return original if repair fails
+        # Create user prompt with repair input
+        user_prompt = f"""# Repair Request
+
+Original Sentence: {sentence}
+
+Issue Type: {issue}
+
+Allowed Evidence:
+```json
+{json.dumps(evidence, indent=2)}
+```
+
+Rewrite the sentence to fix the issue using ONLY the allowed evidence. Return ONLY the repaired sentence with no explanations or markdown."""
         
-        # Read repaired sentence
-        with open(output_file, "r", encoding='utf-8') as f:
-            repaired = f.read().strip()
+        # Use LLM client for repair
+        client = LLMClient(
+            provider=os.getenv('LLM_PROVIDER', 'qwen'),
+            model=os.getenv('LLM_MODEL', 'qwen-turbo'),
+            timeout=60,
+            max_retries=2
+        )
+        
+        repaired = client.call(
+            system=system_prompt,
+            user=user_prompt,
+            temperature=0.2,
+            max_tokens=512
+        )
+        
+        repaired = repaired.strip()
+        
+        # Remove any markdown formatting
+        if repaired.startswith("```") or repaired.startswith('"'):
+            lines = repaired.split("\n")
+            repaired = "\n".join(
+                line for line in lines 
+                if not line.strip().startswith("```")
+            ).strip().strip('"')
         
         return repaired if repaired else sentence
         

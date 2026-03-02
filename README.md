@@ -34,6 +34,48 @@ python3 soa_cli.py
 - ✅ Type-safe state management
 - ✅ Resume from any point if interrupted
 
+---
+
+## ✨ Enhancements (New in v1.1)
+
+**5 Major Improvements to the SOA-CLI Pipeline:**
+
+### 1. SDK Integration with Retry Logic
+- **Replaced** subprocess CLI calls with direct SDK integration
+- **Added** automatic retries with exponential backoff (max 3 attempts)
+- **Improved** error handling and debugging for LLM calls
+- **Benefits**: More reliable, no hidden CLI dependencies, better error messages
+
+### 2. Dynamic Clustering with Silhouette Analysis
+- **Replaced** hardcoded `n_clusters=6` with auto-detection
+- **Added** silhouette score analysis to find optimal cluster count (2-10 range)
+- **Edge cases**: Handles <3 papers or k>paper_count gracefully
+- **Benefits**: Data-driven clustering, better quality groupings
+- **Usage**: `python soa_sdk.py papers/` (auto) or `--clusters 8` (override)
+
+### 3. Multi-Format Export
+- **Added** LaTeX, Markdown, and Word export formats
+- **Supports**: `--format latex|markdown|docx|all`
+- **Benefits**: Flexible output for academic, web, or business use cases
+- **Usage**: `python soa_sdk.py papers/ --format markdown`
+
+### 4. Configurable Citation Styles
+- **Added** 4 academic citation styles: IEEE, APA, Chicago, Harvard
+- **Configured** via `CITATION_STYLE` environment variable
+- **Benefits**: Per-conference customization without code changes
+- **Usage**: Set `CITATION_STYLE=apa` in `.env`
+
+### 5. Smart PDF Truncation
+- **Added** section-aware truncation with priority ordering
+- **Prioritizes**: Abstract → Intro → Methods → Results → Conclusion
+- **De-prioritizes**: Acknowledgements → References → Appendices
+- **Warns** in console when papers are truncated
+- **Benefits**: Better content retention, no silent data loss
+
+See [CHANGELOG.md](CHANGELOG.md) for complete technical details.
+
+---
+
 ## 📖 Documentation
 
 For detailed documentation, see the [docs/](docs/) directory:
@@ -44,6 +86,7 @@ For detailed documentation, see the [docs/](docs/) directory:
 - **[docs/LANGGRAPH_GUIDE.md](docs/LANGGRAPH_GUIDE.md)** - Architecture deep dive
 - **[docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md)** - Thematic contract system
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - Environment variables
+- **[docs/LOGGING.md](docs/LOGGING.md)** - Enhanced logging system (NEW)
 
 ---
 
@@ -304,22 +347,41 @@ python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted
 
 ## ⚙️ Configuration
 
-Set environment variables to adjust:
+Configure via environment variables in `.env`:
 
-```python
-MODEL = None                 # Use default Qwen model (auto-detected)
-TEMPERATURE = 0.2            # Lower = more deterministic
-MAX_WORKERS = 6              # Parallel execution threads
-MAX_PDF_CHARS = 30000        # Characters per paper (~15-20 pages)
+```bash
+# LLM Configuration
+LLM_PROVIDER=qwen            # Provider: qwen, openai, claude, gemini, etc.
+LLM_MODEL=                   # Model name (empty = provider default)
+LLM_TIMEOUT=300              # API timeout in seconds
+
+# Pipeline Configuration
+MAX_WORKERS=10               # Parallel processing threads
+MAX_PDF_CHARS=30000          # Characters per paper (~15-20 pages)
+                             # Intelligently truncates with console warnings
+
+# Clustering Configuration (NEW)
+# CLUSTER_COUNT=6            # Manual override (comment out for auto-detect)
+                             # Auto-detection uses silhouette analysis
+
+# Citation Style (NEW)
+CITATION_STYLE=ieee          # Options: ieee, apa, chicago, harvard
+
+# Output Format (NEW)
+# Set via CLI flag: --format latex|markdown|docx|all
 ```
 
-For clustering, adjust in [src/similarity_cluster.py](src/similarity_cluster.py):
+**Environment Variable Precedence:**
+1. System environment variables
+2. `.env` file
+3. Built-in defaults
 
-```python
-n_clusters = 6               # Number of paper groups
-```
+**New in v1.1:**
+- `CLUSTER_COUNT` now optional (auto-detects optimal clusters)
+- `CITATION_STYLE` configures citation format (IEEE/APA/Chicago/Harvard)
+- `MAX_PDF_CHARS` now uses smart section-aware truncation
 
-**Qwen Model**: System uses default Qwen Code model (auto-detected). If you need to specify a model, set `MODEL = "coder-model"` or your preferred model name.
+See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for complete details.
 
 ## Agent Constraints (IMPORTANT)
 
