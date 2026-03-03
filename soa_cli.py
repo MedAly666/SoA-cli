@@ -18,7 +18,6 @@ load_dotenv()
 
 from src.graph.builder import compile_graph
 from src.graph.state import SOAState
-from src.toon_utils import load_toon, dump_toon
 
 
 def load_paper_paths(papers_dir: str = "papers") -> list[str]:
@@ -70,27 +69,16 @@ def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, l
     for path in paper_paths:
         paper_id = Path(path).stem
         
-        # Check for existing artifacts (prefer .toon, fallback to .json)
-        reader_file = Path(f"artifacts/reader/{paper_id}.toon")
-        if not reader_file.exists():
-            reader_file = Path(f"artifacts/reader/{paper_id}.json")
-            
-        extracted_file = Path(f"artifacts/extracted/{paper_id}.toon")
-        if not extracted_file.exists():
-            extracted_file = Path(f"artifacts/extracted/{paper_id}.json")
-            
-        critic_file = Path(f"artifacts/critic/{paper_id}.toon")
-        if not critic_file.exists():
-            critic_file = Path(f"artifacts/critic/{paper_id}.json")
+        # Check for existing artifacts (JSON only)
+        reader_file = Path(f"artifacts/reader/{paper_id}.json")
+        extracted_file = Path(f"artifacts/extracted/{paper_id}.json")
+        critic_file = Path(f"artifacts/critic/{paper_id}.json")
         
         # Load reader output if exists
         if reader_file.exists():
             try:
-                if reader_file.suffix == '.toon':
-                    reader_outputs[paper_id] = load_toon(reader_file)
-                else:
-                    with open(reader_file, 'r', encoding='utf-8') as f:
-                        reader_outputs[paper_id] = json.load(f)
+                with open(reader_file, 'r', encoding='utf-8') as f:
+                    reader_outputs[paper_id] = json.load(f)
             except (json.JSONDecodeError, IOError, Exception) as e:
                 print(f"  ⚠ Corrupted reader output for {paper_id}, will reprocess")
                 unprocessed_paths.append(path)
@@ -102,11 +90,8 @@ def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, l
         # Load extracted facts if exists
         if extracted_file.exists():
             try:
-                if extracted_file.suffix == '.toon':
-                    extracted_facts[paper_id] = load_toon(extracted_file)
-                else:
-                    with open(extracted_file, 'r', encoding='utf-8') as f:
-                        extracted_facts[paper_id] = json.load(f)
+                with open(extracted_file, 'r', encoding='utf-8') as f:
+                    extracted_facts[paper_id] = json.load(f)
             except (json.JSONDecodeError, IOError, Exception) as e:
                 print(f"  ⚠ Corrupted extracted output for {paper_id}, will reprocess")
                 if path not in unprocessed_paths:
@@ -120,11 +105,8 @@ def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, l
         # Load critic assessment if exists
         if critic_file.exists():
             try:
-                if critic_file.suffix == '.toon':
-                    critic_assessments[paper_id] = load_toon(critic_file)
-                else:
-                    with open(critic_file, 'r', encoding='utf-8') as f:
-                        critic_assessments[paper_id] = json.load(f)
+                with open(critic_file, 'r', encoding='utf-8') as f:
+                    critic_assessments[paper_id] = json.load(f)
             except (json.JSONDecodeError, IOError, Exception) as e:
                 print(f"  ⚠ Corrupted critic output for {paper_id}, will reprocess")
                 if path not in unprocessed_paths:
@@ -188,7 +170,8 @@ def run_pipeline(
     papers_dir: str = "papers",
     max_repair: int = 3,
     thread_id: str = "default",
-    resume: bool = False
+    resume: bool = False,
+    output_format: str = "latex"
 ) -> dict:
     """
     Run the complete SOA pipeline with LangGraph.
@@ -198,6 +181,7 @@ def run_pipeline(
         max_repair: Maximum repair iterations
         thread_id: Unique ID for checkpointing
         resume: Whether to resume from checkpoint
+        output_format: Output format (latex, markdown, docx, or all)
     
     Returns:
         Final state dictionary
@@ -255,7 +239,8 @@ def run_pipeline(
         
         # Save initial state
         serializable_initial = {k: v for k, v in initial_state.items() if v is not None and k != 'embeddings'}
-        dump_toon(serializable_initial, "artifacts/initial_state.toon")
+        with open("artifacts/initial_state.json", 'w', encoding='utf-8') as f:
+            json.dump(serializable_initial, f, indent=2)
     else:
         print("\n[Setup] Resuming from checkpoint...")
         initial_state = None  # Will load from checkpoint
@@ -286,23 +271,63 @@ def run_pipeline(
     print(f"Repair iterations: {final_state.get('repair_iteration', 0)}/{final_state.get('max_repair_iterations', 0)}")
     
     # Save final state
-    output_file = "artifacts/final_state.toon"
+    output_file = "artifacts/final_state.json"
     # Only save serializable parts
     serializable_state = {
         k: v for k, v in final_state.items()
         if k not in ['embeddings'] and v is not None
     }
-    dump_toon(serializable_state, output_file)
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(serializable_state, f, indent=2)
     
     print(f"\n✓ Final state saved to {output_file}")
     
-    # Save State of the Art
+    # Export State of the Art in requested format(s)
     soa_draft = final_state.get('soa_draft')
     if soa_draft:
-        soa_file = "STATE_OF_THE_ART.tex"
-        with open(soa_file, 'w', encoding='utf-8') as f:
-            f.write(soa_draft)
-        print(f"✓ State of the Art saved to {soa_file}")
+        from src.exporter import SOAExporter, export_all_formats
+        
+        print(f"\n[Export] Generating output in '{output_format}' format...")
+        
+        exporter = SOAExporter()
+        output_dir = "artifacts/soa"
+        base_name = "state_of_the_art_final"
+        
+        if output_format == "all":
+            # Export to all formats
+            results = export_all_formats(soa_draft, output_dir, base_name)
+            # Also save LaTeX in root for backward compatibility
+            with open("STATE_OF_THE_ART.tex", 'w', encoding='utf-8') as f:
+                f.write(soa_draft)
+            print(f"✓ LaTeX (root): STATE_OF_THE_ART.tex")
+            
+        elif output_format == "latex":
+            # LaTeX only
+            exporter.to_latex(soa_draft, f"{output_dir}/{base_name}.tex")
+            # Also save in root for backward compatibility
+            with open("STATE_OF_THE_ART.tex", 'w', encoding='utf-8') as f:
+                f.write(soa_draft)
+            print(f"✓ LaTeX: STATE_OF_THE_ART.tex")
+            
+        elif output_format == "markdown":
+            # Markdown only
+            exporter.to_markdown(soa_draft, f"{output_dir}/{base_name}.md")
+            # Also save main output
+            md_content = exporter._latex_to_markdown(soa_draft)
+            with open("STATE_OF_THE_ART.md", 'w', encoding='utf-8') as f:
+                f.write(md_content)
+            print(f"✓ Markdown: STATE_OF_THE_ART.md")
+            
+        elif output_format == "docx":
+            # Word only
+            try:
+                exporter.to_docx(soa_draft, f"{output_dir}/{base_name}.docx")
+                # Also save main output
+                exporter.to_docx(soa_draft, "STATE_OF_THE_ART.docx")
+                print(f"✓ Word: STATE_OF_THE_ART.docx")
+            except ImportError as e:
+                print(f"! Word export failed: {e}")
+                print(f"! Install python-docx: pip install python-docx")
     
     # Print errors if any
     errors = final_state.get('errors', [])
@@ -319,6 +344,11 @@ def run_pipeline(
 def main():
     """Main entry point."""
     import argparse
+    from src.llm_client import verify_provider_or_exit
+    
+    # Verify LLM provider CLI is available
+    provider = os.getenv('LLM_PROVIDER', 'qwen')
+    verify_provider_or_exit(provider)
     
     parser = argparse.ArgumentParser(
         description="SOA-CLI: Automated State of the Art generation with LangGraph"
@@ -351,8 +381,37 @@ def main():
         action="store_true",
         help="Clear all artifacts before running (forces fresh run)"
     )
+    parser.add_argument(
+        "--clusters",
+        type=str,
+        default="auto",
+        help="Number of clusters (default: auto-detect using silhouette analysis, or specify integer)"
+    )
+    parser.add_argument(
+        "--format",
+        type=str,
+        default="latex",
+        choices=["latex", "markdown", "docx", "all"],
+        help="Output format (default: latex). 'all' exports to all formats."
+    )
     
     args = parser.parse_args()
+    
+    # Parse clusters argument
+    if args.clusters.lower() == 'auto':
+        clusters = None  # Auto-detect
+    else:
+        try:
+            clusters = int(args.clusters)
+        except ValueError:
+            print(f"Error: --clusters must be 'auto' or an integer, got '{args.clusters}'")
+            sys.exit(1)
+    
+    # Set CLUSTER_COUNT environment variable for pipeline
+    if clusters is not None:
+        os.environ['CLUSTER_COUNT'] = str(clusters)
+    else:
+        os.environ['CLUSTER_COUNT'] = 'auto'  # Signal auto-detection
     
     # Clear artifacts if requested
     if args.clean:
@@ -363,7 +422,8 @@ def main():
             papers_dir=args.papers,
             max_repair=args.max_repair,
             thread_id=args.thread_id,
-            resume=args.resume
+            resume=args.resume,
+            output_format=args.format
         )
     except Exception as e:
         print(f"\n✗ Pipeline failed: {e}", file=sys.stderr)

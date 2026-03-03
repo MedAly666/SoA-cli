@@ -17,9 +17,6 @@ import fitz  # PyMuPDF
 
 from .state import SOAState
 
-# Import TOON utilities for token-efficient serialization
-from src.toon_utils import dump_toon, load_toon, dumps as toon_dumps, loads as toon_loads
-
 # Import utilities from parent src package
 import sys
 from pathlib import Path
@@ -38,70 +35,203 @@ def inject_contract(data: dict, contract: dict) -> dict:
     return inject_theme_into_input(data, contract)
 
 
-def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> str:
-    """Extract text from PDF using PyMuPDF."""
+def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> tuple[str, dict]:
+    """
+    Extract text from PDF using PyMuPDF with smart truncation.
+    
+    Smart truncation:
+    - Preferentially keeps: Abstract, Intro, Methods, Results, Conclusion
+    - Drops first: References, Acknowledgements, Appendices
+    - Warns when truncation occurs
+    
+    Args:
+        pdf_path: Path to PDF file
+        max_chars: Maximum characters to extract
+        
+    Returns:
+        Tuple of (extracted_text, truncation_info_dict)
+    """
     import os
     if max_chars is None:
         max_chars = int(os.getenv('MAX_PDF_CHARS', '30000'))
     
     try:
         doc = fitz.open(pdf_path)
-        text_parts = []
-        total_chars = 0
-        pages_extracted = 0
+        filename = Path(pdf_path).name
         total_pages = len(doc)
-        max_pages = min(25, total_pages)
         
-        for page_num in range(max_pages):
+        # First pass: extract all text
+        all_pages = []
+        total_untruncated_chars = 0
+        
+        for page_num in range(total_pages):
             page = doc[page_num]
-            text = page.get_text()
-            
+            text = str(page.get_text())  # Ensure text is a string
             if text.strip():
-                if total_chars + len(text) > max_chars:
-                    remaining = max_chars - total_chars
-                    if remaining > 500:
-                        text_parts.append(f"### Page {page_num + 1} (truncated) ###\n{text[:remaining]}")
-                    break
-                
-                text_parts.append(f"### Page {page_num + 1} ###\n{text}")
-                total_chars += len(text)
-                pages_extracted += 1
+                all_pages.append({
+                    'page_num': page_num + 1,
+                    'text': text,
+                    'chars': len(text)
+                })
+                total_untruncated_chars += len(text)
         
         doc.close()
         
-        if not text_parts:
+        if not all_pages:
             raise RuntimeError("No text extracted from PDF")
         
-        result = "\n\n".join(text_parts)
-        metadata = f"[PDF: {Path(pdf_path).name}]\n"
-        metadata += f"[Extracted: {pages_extracted}/{total_pages} pages, {len(result):,} characters]\n\n"
+        # Check if truncation is needed
+        truncated = total_untruncated_chars > max_chars
+        truncation_info = {
+            'truncated': truncated,
+            'original_chars': total_untruncated_chars,
+            'original_pages': total_pages,
+            'max_chars': max_chars
+        }
         
-        return metadata + result
+        if truncated:
+            # Smart truncation
+            important_pages = _select_important_pages(all_pages, max_chars)
+            
+            # Build output
+            text_parts = []
+            total_chars = 0
+            
+            for page_info in important_pages:
+                page_text = page_info['text']
+                page_num = page_info['page_num']
+                
+                if total_chars + len(page_text) > max_chars:
+                    # Partial page
+                    remaining = max_chars - total_chars
+                    if remaining > 500:
+                        text_parts.append(f"### Page {page_num} (truncated) ###\n{page_text[:remaining]}")
+                    break
+                
+                text_parts.append(f"### Page {page_num} ###\n{page_text}")
+                total_chars += len(page_text)
+            
+            result = "\n\n".join(text_parts)
+            
+            # Update truncation info
+            truncation_info['final_chars'] = len(result)
+            truncation_info['final_pages'] = len(text_parts)
+            truncation_info['lost_chars'] = total_untruncated_chars - len(result)
+            truncation_info['lost_percentage'] = (truncation_info['lost_chars'] / total_untruncated_chars) * 100
+            
+            # Print warning
+            print(f"  ⚠️  [{filename}] truncated at {max_chars:,} chars")
+            print(f"      Full length: {total_untruncated_chars:,} chars")
+            print(f"      Lost: {truncation_info['lost_chars']:,} chars ({truncation_info['lost_percentage']:.1f}%)")
+            print(f"      Appendices/References may be excluded")
+            
+        else:
+            # No truncation
+            text_parts = []
+            for page_info in all_pages:
+                text_parts.append(f"### Page {page_info['page_num']} ###\n{page_info['text']}")
+            
+            result = "\n\n".join(text_parts)
+            truncation_info['final_chars'] = len(result)
+            truncation_info['final_pages'] = len(all_pages)
+        
+        # Add metadata
+        metadata = f"[PDF: {filename}]\n"
+        metadata += f"[Extracted: {truncation_info['final_pages']}/{total_pages} pages, {len(result):,} characters]\n"
+        if truncated:
+            metadata += f"[WARNING: Truncated from {total_untruncated_chars:,} chars]\n"
+        metadata += "\n"
+        
+        return metadata + result, truncation_info
         
     except Exception as e:
         raise RuntimeError(f"Failed to extract text from PDF: {e}")
 
 
+def _select_important_pages(all_pages: list, max_chars: int) -> list:
+    """Select important pages for PDF truncation."""
+    # Score pages by importance
+    for page in all_pages:
+        text_lower = page['text'].lower()
+        page['importance'] = 0
+        
+        # Important sections
+        if any(keyword in text_lower for keyword in ['abstract', 'introduction', 'method', 'result', 'conclusion']):
+            page['importance'] += 10
+        
+        # Skip sections
+        if any(keyword in text_lower for keyword in ['reference', 'acknowledgement', 'appendix']):
+            page['importance'] -= 50
+        
+        # Boost early pages
+        if page['page_num'] <= 5:
+            page['importance'] += 5
+    
+    # Sort by importance
+    sorted_pages = sorted(all_pages, key=lambda p: p['importance'], reverse=True)
+    
+    # Select pages
+    selected = []
+    total_chars = 0
+    for page in sorted_pages:
+        if total_chars + page['chars'] <= max_chars:
+            selected.append(page)
+            total_chars += page['chars']
+    
+    # Sort back by page number
+    selected.sort(key=lambda p: p['page_num'])
+    return selected
+
+
 def call_llm(system_prompt_path: str, input_data: dict, output_path: str) -> str:
     """
-    Call LLM via subprocess (maintains compatibility with existing CLI).
+    Call LLM using unified LLMClient.
     
-    This is a wrapper around the existing run_llm function.
+    Args:
+        system_prompt_path: Path to system prompt file
+        input_data: Dictionary to pass as input
+        output_path: Where to save the output
+        
+    Returns:
+        LLM response text
     """
     from pathlib import Path
-    import subprocess
     import os
     import re
+    from src.llm_client import LLMClient
     
     # Load system prompt
     with open(system_prompt_path, 'r', encoding='utf-8') as f:
         system_text = f.read()
     
-    # Prepare input
+    # Inject citation style instructions for writer and repair prompts
+    if 'writer' in system_prompt_path or 'repair' in system_prompt_path:
+        from src.citation_formatter import get_citation_instructions
+        citation_style = os.getenv('CITATION_STYLE', 'ieee')
+        citation_instructions = get_citation_instructions(citation_style)
+        
+        # Add citation instructions to system prompt
+        system_text += f"\n\n{citation_instructions}"
+        print(f"  [Citation Style: {citation_style.upper()}]")
+    
+    # Prepare input as user prompt
     input_json = json.dumps(input_data, indent=2)
-    combined_prompt = f"""{system_text}
+    
+    # Writer and repair nodes should output LaTeX, not JSON
+    is_latex_output = 'writer' in system_prompt_path or 'repair' in system_prompt_path
+    
+    if is_latex_output:
+        # For LaTeX output: Don't force JSON format
+        user_prompt = f"""# Input
 
-# Input
+```json
+{input_json}
+```
+
+Generate the output as specified in the system prompt. Follow all formatting instructions carefully."""
+    else:
+        # For JSON output: Explicitly request JSON format
+        user_prompt = f"""# Input
 
 ```json
 {input_json}
@@ -109,66 +239,47 @@ def call_llm(system_prompt_path: str, input_data: dict, output_path: str) -> str
 
 Generate the output as valid JSON. Return ONLY the JSON with no markdown formatting."""
     
-    # Get LLM config from environment
-    provider = os.getenv('LLM_PROVIDER', 'qwen')
-    model = os.getenv('LLM_MODEL', None)
-    timeout = int(os.getenv('LLM_TIMEOUT', '300'))
-    
-    # Build command (simplified - uses qwen by default)
-    cmd = ['qwen']
-    if model:
-        cmd.extend(['-m', model])
-    cmd.extend(['-y'])
-    
     # Debug: log configuration (only for writer/synthesis nodes which take longest)
     if 'writer' in system_prompt_path or 'synthesis' in system_prompt_path:
+        provider = os.getenv('LLM_PROVIDER', 'qwen')
+        model = os.getenv('LLM_MODEL', None)
+        timeout = int(os.getenv('LLM_TIMEOUT', '300'))
         print(f"  [LLM Config] Provider: {provider}, Model: {model or 'default'}, Timeout: {timeout}s")
     
-    try:
-        result = subprocess.run(
-            cmd,
-            input=combined_prompt,
-            capture_output=True,
-            text=True,
-            timeout=timeout
-        )
-        
-        if result.returncode != 0:
-            raise RuntimeError(f"LLM CLI failed: {result.stderr}")
-        
-        output_text = result.stdout.strip()
-        
-        # Remove markdown code blocks
-        if output_text.startswith("```"):
-            lines = output_text.split("\n")
-            start_idx = 1
-            end_idx = len(lines) - 1
-            for i in range(len(lines) - 1, -1, -1):
-                if lines[i].strip() == "```":
-                    end_idx = i
-                    break
-            output_text = "\n".join(lines[start_idx:end_idx])
-        
-        # Sanitize control characters
-        if output_path.endswith('.json'):
-            output_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', output_text)
-            json.loads(output_text)  # Validate
-        
-        # Save output
+    # Call LLM via unified client
+    client = LLMClient()
+    output_text = client.call(system_text, user_prompt)
+    
+    # Check for LLM failure
+    if output_text.startswith("__LLM_FAILURE__:"):
+        # Log failure but don't crash - return error as output
+        print(f"  ⚠️  LLM call failed: {output_text}")
+        # Save failure message to output file
         Path(output_path).parent.mkdir(parents=True, exist_ok=True)
         with open(output_path, 'w', encoding='utf-8') as f:
-            f.write(output_text)
-        
+            f.write('{"error": "' + output_text.replace('"', '\\"') + '"}')
         return output_text
-        
-    except subprocess.TimeoutExpired as e:
-        raise RuntimeError(
-            f"LLM timeout after {timeout}s. Try increasing LLM_TIMEOUT in .env file "
-            f"(current: {timeout}s). For large synthesis/writing tasks, "
-            f"600-900 seconds may be needed."
-        )
-    except Exception as e:
-        raise RuntimeError(f"LLM error: {e}")
+    
+    # Sanitize control characters for JSON output
+    if output_path.endswith('.json'):
+        output_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', output_text)
+        try:
+            json.loads(output_text)  # Validate
+        except json.JSONDecodeError as e:
+            print(f"  ⚠️  Invalid JSON from LLM: {e}")
+            # Return error in JSON format
+            error_json = '{"error": "Invalid JSON from LLM"}'
+            Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+            with open(output_path, 'w', encoding='utf-8') as f:
+                f.write(error_json)
+            return error_json
+    
+    # Save output
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(output_text)
+    
+    return output_text
 
 
 # ========== NODE FUNCTIONS ==========
@@ -183,13 +294,9 @@ def theme_builder_node(state: SOAState) -> dict:
     print("\n[Node: Theme Builder]")
     try:
         # Check if contract already exists
-        if Path("THEMATIC_CONTRACT.toon").exists():
+        if Path("THEMATIC_CONTRACT.json").exists():
             print("  Loading existing contract...")
-            contract = load_toon("THEMATIC_CONTRACT.toon")
-        elif Path("THEMATIC_CONTRACT.json").exists():
-            # Legacy JSON support
-            print("  Loading existing contract (JSON)...")
-            with open("THEMATIC_CONTRACT.json", 'r') as f:
+            with open("THEMATIC_CONTRACT.json", 'r', encoding='utf-8') as f:
                 contract = json.load(f)
         else:
             print("  Building new contract...")
@@ -236,11 +343,11 @@ def reader_map_node(state: SOAState) -> dict:
     def process_single_paper(path: str) -> tuple[str, dict]:
         """Process a single paper (called in parallel)."""
         paper_id = Path(path).stem
-        output_path = f"artifacts/reader/{paper_id}.toon"
+        output_path = f"artifacts/reader/{paper_id}.json"
         
         try:
-            # Extract PDF text
-            pdf_text = extract_pdf_text(path)
+            # Extract PDF text (now returns tuple with truncation info)
+            pdf_text, truncation_info = extract_pdf_text(path)
             
             # Save to temp file for LLM
             temp_input = f"artifacts/reader/_temp_{paper_id}.txt"
@@ -258,8 +365,17 @@ def reader_map_node(state: SOAState) -> dict:
             # Clean up temp file
             Path(temp_input).unlink(missing_ok=True)
             
-            result = toon_loads(output_text)
+            result = json.loads(output_text)
             result["paper_id"] = paper_id
+            
+            # Add truncation metadata if truncation occurred
+            if truncation_info and truncation_info.get('truncated', False):
+                result["truncation_warning"] = {
+                    "message": f"PDF was truncated from {truncation_info['original_chars']:,} to {truncation_info['final_chars']:,} chars ({truncation_info['lost_percentage']:.1f}% lost)",
+                    "original_chars": truncation_info['original_chars'],
+                    "final_chars": truncation_info['final_chars'],
+                    "lost_percentage": truncation_info['lost_percentage']
+                }
             
             print(f"  ✓ {paper_id}")
             return paper_id, result
@@ -332,7 +448,7 @@ def extractor_map_node(state: SOAState) -> dict:
         if "error" in paper_data:
             return paper_id, paper_data
         
-        output_path = f"artifacts/extracted/{paper_id}.toon"
+        output_path = f"artifacts/extracted/{paper_id}.json"
         
         try:
             # Inject thematic contract
@@ -354,7 +470,7 @@ def extractor_map_node(state: SOAState) -> dict:
             # Clean up temp file
             Path(input_path).unlink(missing_ok=True)
             
-            result = toon_loads(output_text)
+            result = json.loads(output_text)
             result["paper_id"] = paper_id
             
             print(f"  ✓ {paper_id}")
@@ -427,7 +543,7 @@ def critic_map_node(state: SOAState) -> dict:
         if "error" in paper_data:
             return paper_id, paper_data
         
-        output_path = f"artifacts/critic/{paper_id}.toon"
+        output_path = f"artifacts/critic/{paper_id}.json"
         
         try:
             # Prepare input
@@ -446,7 +562,7 @@ def critic_map_node(state: SOAState) -> dict:
             # Clean up temp file
             Path(input_path).unlink(missing_ok=True)
             
-            result = toon_loads(output_text)
+            result = json.loads(output_text)
             result["paper_id"] = paper_id
             
             print(f"  ✓ {paper_id}")
@@ -548,12 +664,19 @@ def cluster_node(state: SOAState) -> dict:
     
     try:
         import os
-        n_clusters = int(os.getenv('CLUSTER_COUNT', '6'))
+        cluster_setting = os.getenv('CLUSTER_COUNT', 'auto')
         
-        print(f"  Running clustering (k={n_clusters})...")
+        # Parse cluster setting
+        if cluster_setting.lower() == 'auto':
+            n_clusters = None  # Auto-detect
+            print(f"  Running clustering with auto-detection...")
+        else:
+            n_clusters = int(cluster_setting)
+            print(f"  Running clustering (k={n_clusters})...")
+        
         clusters = run_similarity_clustering(n_clusters=n_clusters)
         
-        print(f"  ✓ Created {len(clusters.get('clusters', []))} clusters")
+        print(f"  ✓ Created {len(clusters)} clusters")
         
         return {
             "raw_clusters": clusters,
@@ -607,10 +730,10 @@ def interpret_clusters_node(state: SOAState) -> dict:
         output_text = call_llm(
             "prompts/cluster.system.txt",
             agent_input,
-            "artifacts/clusters/clusters.toon"
+            "artifacts/clusters/clusters.json"
         )
         
-        result = toon_loads(output_text)
+        result = json.loads(output_text)
         
         print(f"  ✓ Interpreted clusters")
         
@@ -663,10 +786,10 @@ def synthesis_node(state: SOAState) -> dict:
         output_text = call_llm(
             "prompts/synthesis.system.txt",
             agent_input,
-            "artifacts/synthesis/synthesis.toon"
+            "artifacts/synthesis/synthesis.json"
         )
         
-        result = toon_loads(output_text)
+        result = json.loads(output_text)
         
         print(f"  ✓ Synthesis complete")
         

@@ -10,7 +10,6 @@ import json
 import subprocess
 from pathlib import Path
 from .hallucination_detector import run_hallucination_checks
-from src.toon_utils import load_toon, dump_toon
 
 
 MAX_REPAIR_ITERATIONS = 3
@@ -62,6 +61,8 @@ def run_repair_agent(sentence, issue, evidence):
     Returns:
         Repaired sentence
     """
+    from src.llm_client import LLMClient
+    
     # Prepare input for repair agent
     repair_input = {
         "original_sentence": sentence,
@@ -69,39 +70,27 @@ def run_repair_agent(sentence, issue, evidence):
         "allowed_evidence": evidence
     }
     
-    # Save to temp file
-    input_file = "artifacts/soa/_repair_input.json"
-    with open(input_file, "w", encoding='utf-8') as f:
-        json.dump(repair_input, f, indent=2)
-    
-    output_file = "artifacts/soa/_repair_output.txt"
-    
+    # Load system prompt
     try:
-        # Call Qwen with repair prompt
-        cmd = [
-            "qwen", "run",
-            "--model", "qwen3.5-32b",
-            "--system", "prompts/repair.system.txt",
-            "--input", input_file,
-            "--output", output_file,
-            "--temperature", "0.2"
-        ]
-        
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-        
-        if result.returncode != 0:
-            print(f"[!] Repair agent failed: {result.stderr}")
-            return sentence  # Return original if repair fails
-        
-        # Read repaired sentence
-        with open(output_file, "r", encoding='utf-8') as f:
-            repaired = f.read().strip()
-        
-        return repaired if repaired else sentence
-        
-    except Exception as e:
-        print(f"[!] Error in repair agent: {e}")
+        with open("prompts/repair.system.txt", "r", encoding='utf-8') as f:
+            system_prompt = f.read()
+    except FileNotFoundError:
+        print("[!] Repair system prompt not found")
         return sentence
+    
+    # Prepare user prompt
+    user_prompt = json.dumps(repair_input, indent=2)
+    
+    # Call LLM via unified client
+    client = LLMClient(timeout=60)  # Shorter timeout for repairs
+    repaired = client.call(system_prompt, user_prompt)
+    
+    # Check for LLM failure
+    if repaired.startswith("__LLM_FAILURE__:"):
+        print(f"[!] Repair agent failed: {repaired}")
+        return sentence  # Return original if repair fails
+    
+    return repaired.strip() if repaired else sentence
 
 
 def repair_document(soa_text, violations, extracted_db):
@@ -190,9 +179,10 @@ def repair_document(soa_text, violations, extracted_db):
         ]
     }
     
-    dump_toon(failure_report, "artifacts/soa/repair_failure.toon")
+    with open("artifacts/soa/repair_failure.json", 'w', encoding='utf-8') as f:
+        json.dump(failure_report, f, indent=2)
     
-    print("[✓] Failure report saved to artifacts/soa/repair_failure.toon")
+    print("[✓] Failure report saved to artifacts/soa/repair_failure.json")
     
     return repaired_text, False
 
@@ -223,12 +213,29 @@ def repair_pipeline(soa_file, extracted_db, critic_db=None):
     if violations_report["total_violations"] == 0:
         print("[✓] No violations detected - SoA is clean")
         
-        # Save final version
-        output_file = "artifacts/soa/state_of_the_art_final.tex"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(soa_text)
+        # Save final version in multiple formats if requested
+        import os
+        from src.exporter import SOAExporter, export_all_formats
         
-        print(f"[✓] Saved final SoA to {output_file}")
+        output_format = os.getenv('OUTPUT_FORMAT', 'latex')
+        exporter = SOAExporter()
+        output_dir = "artifacts/soa"
+        base_name = "state_of_the_art_final"
+        
+        if output_format == "all":
+            export_all_formats(soa_text, output_dir, base_name)
+        elif output_format == "latex":
+            exporter.to_latex(soa_text, f"{output_dir}/{base_name}.tex")
+        elif output_format == "markdown":
+            exporter.to_markdown(soa_text, f"{output_dir}/{base_name}.md")
+        elif output_format == "docx":
+            try:
+                exporter.to_docx(soa_text, f"{output_dir}/{base_name}.docx")
+            except ImportError:
+                print("  ! Word export requires python-docx, saving as LaTeX")
+                exporter.to_latex(soa_text, f"{output_dir}/{base_name}.tex")
+        
+        print(f"[✓] Saved final SoA to {output_dir}/{base_name}.*")
         return True
     
     # Extract violations with claims
@@ -240,21 +247,37 @@ def repair_pipeline(soa_file, extracted_db, critic_db=None):
     final_text, success = repair_document(soa_text, violations, extracted_db)
     
     # Save final version
+    import os
+    from src.exporter import SOAExporter, export_all_formats
+    
+    output_format = os.getenv('OUTPUT_FORMAT', 'latex')
+    exporter = SOAExporter()
+    output_dir = "artifacts/soa"
+    base_name = "state_of_the_art_final" if success else "state_of_the_art_repaired_partial"
+    
     if success:
-        output_file = "artifacts/soa/state_of_the_art_final.tex"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(final_text)
+        if output_format == "all":
+            export_all_formats(final_text, output_dir, base_name)
+        elif output_format == "latex":
+            exporter.to_latex(final_text, f"{output_dir}/{base_name}.tex")
+        elif output_format == "markdown":
+            exporter.to_markdown(final_text, f"{output_dir}/{base_name}.md")
+        elif output_format == "docx":
+            try:
+                exporter.to_docx(final_text, f"{output_dir}/{base_name}.docx")
+            except ImportError:
+                print("  ! Word export requires python-docx, saving as LaTeX")
+                exporter.to_latex(final_text, f"{output_dir}/{base_name}.tex")
         
         print(f"\n[✓] Successfully repaired SoA")
-        print(f"[✓] Saved final version to {output_file}")
+        print(f"[✓] Saved final version to {output_dir}/{base_name}.*")
         return True
     else:
-        output_file = "artifacts/soa/state_of_the_art_repaired_partial.tex"
-        with open(output_file, 'w', encoding='utf-8') as f:
-            f.write(final_text)
+        # For partial repairs, always save as LaTeX
+        exporter.to_latex(final_text, f"{output_dir}/{base_name}.tex")
         
         print(f"\n[!] Partial repair only")
-        print(f"[!] Saved partially repaired version to {output_file}")
+        print(f"[!] Saved partially repaired version to {output_dir}/{base_name}.tex")
         print(f"[!] See artifacts/soa/repair_failure.json for details")
         return False
 
@@ -269,13 +292,10 @@ if __name__ == "__main__":
     # Load extracted papers
     extracted_path = Path(sys.argv[2])
     extracted_db = {}
-    # Support both .toon and .json files
-    for f in list(extracted_path.glob("*.toon")) + list(extracted_path.glob("*.json")):
-        if f.suffix == '.toon':
-            data = load_toon(f)
-        else:
-            with open(f, 'r', encoding='utf-8') as file:
-                data = json.load(file)
+    # Load extracted facts - JSON only
+    for f in list(extracted_path.glob("*.json")):
+        with open(f, 'r', encoding='utf-8') as file:
+            data = json.load(file)
         extracted_db[data["paper_id"]] = data
     
     # Run repair pipeline

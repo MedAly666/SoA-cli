@@ -92,7 +92,8 @@ _*.txt
 *.fls
 *.pdf
 *.fdb_latexmk
-
+*.backup
+*.bak
 # Keep directory structure but ignore contents
 !artifacts/.gitkeep
 !papers/.gitkeep

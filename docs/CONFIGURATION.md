@@ -84,12 +84,53 @@ SOA-CLI uses environment variables for configuration management. All configurati
 - **Recommended:** `0.2` - `0.5` for academic State of the Art generation
 
 #### `LLM_TIMEOUT`
-- **Default:** `300` (5 minutes)
+- **Default:** `120` (2 minutes)
 - **Unit:** Seconds
-- **Description:** Maximum time to wait for LLM API response
+- **Description:** Maximum time to wait for LLM API response per attempt
+- **Retry Behavior:** System retries up to 3 times with exponential backoff (2s, 4s, 8s delays)
 - **Adjust if:**
-  - You experience timeouts → increase (e.g., `600`)
-  - Papers are very short → decrease (e.g., `180`)
+  - You experience timeouts → increase (e.g., `300` for 5 minutes, `600` for 10 minutes)
+  - Papers are very short → decrease (e.g., `60`)
+  - Large synthesis tasks → increase to `300-600`
+- **Note:** Total wait time = timeout × 3 attempts (e.g., 120s × 3 = up to 6 minutes)
+
+#### `CITATION_STYLE`
+- **Default:** `ieee`
+- **Options:** `ieee`, `apa`, `chicago`, `harvard`
+- **Description:** Academic citation style for the State of the Art document
+- **Style Details:**
+  
+  **IEEE (Institute of Electrical and Electronics Engineers):**
+  - Numeric citations: `[1]`, `[2]`, `[3]`
+  - Sequential numbering in order of appearance
+  - Format: `[1] A. Smith, "Title," Journal, vol. 1, no. 2, pp. 10-20, 2020.`
+  - **Recommended for:** Computer Science, Engineering, Technical papers
+  
+  **APA (American Psychological Association):**
+  - Author-date citations: `(Smith, 2020)`, `(Smith & Jones, 2020)`
+  - Ampersand (&) in parentheses, "and" in text
+  - Format: `Smith, A., & Jones, B. (2020). Title. Journal, 1(2), 10-20.`
+  - **Recommended for:** Psychology, Social Sciences, Education
+  
+  **Chicago (Author-Date System):**
+  - Author-date with full names: `(John Smith and Jane Doe 2020)`
+  - Format: `Smith, John, and Jane Doe. 2020. "Title." Journal 1 (2): 10-20.`
+  - **Recommended for:** Humanities, History, Arts
+  
+  **Harvard:**
+  - Author-date with surnames: `(Smith and Doe 2020)`
+  - "and" connector (no ampersand)
+  - Format: `Smith, A. and Doe, J. (2020) 'Title', Journal, 1(2), pp. 10-20.`
+  - **Recommended for:** UK universities, Business, Law
+
+- **Example:**
+  ```env
+  # For Computer Science papers
+  CITATION_STYLE=ieee
+  
+  # For Psychology papers
+  CITATION_STYLE=apa
+  ```
 
 ### Pipeline Configuration
 
@@ -109,24 +150,123 @@ SOA-CLI uses environment variables for configuration management. All configurati
 - **Unit:** Characters
 - **Description:** Maximum characters to extract from each PDF
 - **Equivalent:** ~15-20 pages (includes abstract, intro, methods, results)
+- **Smart Truncation:** When PDFs exceed this limit, the system:
+  - Scores pages by importance (abstract, intro, methods, results, conclusion = +10)
+  - Deprioritizes references, acknowledgements, appendices (-50)
+  - Prefers early pages (pages 1-5 = +5 boost)
+  - Prints yellow warning with truncation statistics
+  - Stores truncation metadata in artifacts
 - **Guidelines:**
   - Short papers (10 pages): `20000`
-  - Standard papers (20-30 pages): `30000`
+  - Standard papers (20-30 pages): `30000` (default)
   - Long papers (40+ pages): `40000-50000`
 - **Trade-off:** 
   - Higher = More complete extraction, longer LLM processing time
   - Lower = Faster processing, may miss important content
+- **Warning Display:**
+  ```
+  ⚠️  [paper.pdf] truncated at 30,000 chars
+      Full length: 75,000 chars
+      Lost: 45,000 chars (60.0%)
+      Appendices/References may be excluded
+  ```
 
 #### `CLUSTER_COUNT`
-- **Default:** `6`
-- **Range:** `2` - `20`
+- **Default:** `6` (or `auto` via CLI flag)
+- **Range:** `2` - `20`, or `auto`
 - **Description:** Number of clusters for similarity-based paper grouping
-- **Guidelines:**
+- **Auto-Detection:** Use `--clusters auto` CLI flag to automatically detect optimal cluster count
+  - Uses silhouette analysis to test k from 2 to 10
+  - Selects k with highest silhouette score (best cluster separation)
+  - Logs all scores and optimal k selection
+  - Handles edge cases (< 3 papers)
+- **Manual Guidelines:**
   - <20 papers: `3-4` clusters
   - 20-50 papers: `4-6` clusters
   - 50-100 papers: `6-10` clusters
   - 100+ papers: `8-15` clusters
 - **Note:** Too few clusters = overly broad categories; too many = fragmented insights
+- **Example:**
+  ```bash
+  # Auto-detect optimal cluster count (recommended)
+  python soa_cli.py --clusters auto
+  
+  # Manual override
+  python soa_cli.py --clusters 5
+  ```
+- **Silhouette Analysis Output:**
+  ```
+  Testing cluster counts from 2 to 8...
+    k=2: silhouette score = 0.45
+    k=3: silhouette score = 0.52  ← Optimal
+    k=4: silhouette score = 0.48
+  Optimal cluster count: 3 (silhouette score: 0.52)
+  ```
+
+### CLI Flags
+
+In addition to environment variables, SOA-CLI supports command-line flags for runtime configuration:
+
+#### `--clusters`
+- **Options:** `auto` or integer (2-20)
+- **Default:** `6`
+- **Description:** Override cluster count from command line
+- **Examples:**
+  ```bash
+  # Auto-detect optimal cluster count
+  python soa_cli.py --clusters auto
+  
+  # Manually set to 5 clusters
+  python soa_cli.py --clusters 5
+  ```
+
+#### `--format`
+- **Options:** `latex`, `markdown`, `docx`, `all`
+- **Default:** `latex`
+- **Description:** Output format for State of the Art document
+- **Formats:**
+  - `latex`: LaTeX source file (`.tex`) - default
+  - `markdown`: Markdown file (`.md`) - converted from LaTeX
+  - `docx`: Microsoft Word document (`.docx`) - with styled formatting
+  - `all`: Export all three formats simultaneously
+- **Examples:**
+  ```bash
+  # Export as Markdown
+  python soa_cli.py --format markdown
+  
+  # Export as Word document
+  python soa_cli.py --format docx
+  
+  # Export all formats at once
+  python soa_cli.py --format all
+  ```
+- **Output Files:**
+  - LaTeX: `state_of_the_art.tex`
+  - Markdown: `state_of_the_art.md`
+  - Word: `state_of_the_art.docx`
+- **Word Formatting:**
+  - Section headers: Heading 1 style
+  - Subsection headers: Heading 2 style
+  - Bold text: **Bold** formatting
+  - Italic text: *Italic* formatting
+  - Citations: Blue colored text
+
+#### Other Flags
+- `--papers`: Specify custom papers directory (default: `papers/`)
+- `--max-repair`: Set maximum repair iterations (default: 3)
+- `--skip-reader`: Skip PDF extraction stage
+- `--skip-download`: Skip paper download stage
+- `--resume`: Resume from checkpoint
+- `--thread-id`: Specify checkpoint thread ID
+
+#### Combined Usage
+```bash
+# Complete example: auto-cluster, export all formats, APA citations
+CITATION_STYLE=apa python soa_cli.py --clusters auto --format all
+
+# Fast processing with custom papers directory
+python soa_cli.py --papers /path/to/pdfs --clusters 4 --format markdown
+```
 
 ## Examples
 
@@ -137,7 +277,8 @@ SOA-CLI uses environment variables for configuration management. All configurati
 LLM_PROVIDER=qwen
 LLM_MODEL=
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=300
+LLM_TIMEOUT=120
+CITATION_STYLE=ieee
 MAX_WORKERS=10
 MAX_PDF_CHARS=30000
 CLUSTER_COUNT=6
@@ -148,7 +289,8 @@ CLUSTER_COUNT=6
 LLM_PROVIDER=claude
 LLM_MODEL=claude-sonnet-4.5
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=300
+LLM_TIMEOUT=120
+CITATION_STYLE=ieee
 MAX_WORKERS=10
 MAX_PDF_CHARS=30000
 CLUSTER_COUNT=6
@@ -159,7 +301,8 @@ CLUSTER_COUNT=6
 LLM_PROVIDER=gemini
 LLM_MODEL=gemini-3-pro
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=300
+LLM_TIMEOUT=120
+CITATION_STYLE=ieee
 MAX_WORKERS=10
 MAX_PDF_CHARS=30000
 CLUSTER_COUNT=6
@@ -170,7 +313,8 @@ CLUSTER_COUNT=6
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-5.2
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=300
+LLM_TIMEOUT=120
+CITATION_STYLE=ieee
 MAX_WORKERS=10
 MAX_PDF_CHARS=30000
 CLUSTER_COUNT=6
@@ -181,7 +325,8 @@ CLUSTER_COUNT=6
 LLM_PROVIDER=glm
 LLM_MODEL=glm-5
 LLM_TEMPERATURE=0.2
-LLM_TIMEOUT=300
+LLM_TIMEOUT=120
+CITATION_STYLE=ieee
 MAX_WORKERS=10
 MAX_PDF_CHARS=30000
 CLUSTER_COUNT=6
@@ -194,7 +339,8 @@ CLUSTER_COUNT=6
 LLM_PROVIDER=qwen
 LLM_MODEL=
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=180
+LLM_TIMEOUT=60
+CITATION_STYLE=ieee
 MAX_WORKERS=4
 MAX_PDF_CHARS=20000
 CLUSTER_COUNT=4
@@ -205,7 +351,8 @@ CLUSTER_COUNT=4
 LLM_PROVIDER=qwen
 LLM_MODEL=
 LLM_TEMPERATURE=0.3
-LLM_TIMEOUT=300
+LLM_TIMEOUT=120
+CITATION_STYLE=ieee
 MAX_WORKERS=10
 MAX_PDF_CHARS=30000
 CLUSTER_COUNT=6
@@ -216,7 +363,8 @@ CLUSTER_COUNT=6
 LLM_PROVIDER=qwen
 LLM_MODEL=
 LLM_TEMPERATURE=0.2
-LLM_TIMEOUT=600
+LLM_TIMEOUT=300
+CITATION_STYLE=ieee
 MAX_WORKERS=12
 MAX_PDF_CHARS=40000
 CLUSTER_COUNT=10
@@ -227,7 +375,8 @@ CLUSTER_COUNT=10
 LLM_PROVIDER=claude
 LLM_MODEL=claude-opus-4
 LLM_TEMPERATURE=0.7
-LLM_TIMEOUT=300
+LLM_TIMEOUT=120
+CITATION_STYLE=apa
 MAX_WORKERS=8
 MAX_PDF_CHARS=30000
 CLUSTER_COUNT=6
@@ -238,10 +387,18 @@ CLUSTER_COUNT=6
 ### Timeout Errors
 **Problem:** LLM calls timeout frequently
 
+**Understanding Retry Behavior:**
+- System automatically retries failed LLM calls up to 3 times
+- Exponential backoff delays: 2s, 4s, 8s between attempts
+- Total possible wait time = `LLM_TIMEOUT × 3` (e.g., 120s × 3 = 6 minutes)
+- Failed calls return `__LLM_FAILURE__` instead of crashing the pipeline
+
 **Solutions:**
-1. Increase `LLM_TIMEOUT` to `600` or higher
-2. Decrease `MAX_PDF_CHARS` to `20000`
-3. Reduce `MAX_WORKERS` to `4-6`
+1. Increase `LLM_TIMEOUT` to `300` (5 minutes) or `600` (10 minutes)
+2. Decrease `MAX_PDF_CHARS` to `20000` (reduces input size)
+3. Reduce `MAX_WORKERS` to `4-6` (less concurrent load)
+4. Check provider CLI is working: `echo "test" | qwen -y` (or your provider)
+5. Verify API keys are set correctly (if required by provider)
 
 ### Memory Issues
 **Problem:** System runs out of memory

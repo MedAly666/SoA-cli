@@ -34,6 +34,60 @@ python3 soa_cli.py
 - ✅ Type-safe state management
 - ✅ Resume from any point if interrupted
 
+---
+
+## 🎯 Recent Enhancements
+
+SOA-CLI has been enhanced with five major improvements for reliability, flexibility, and user experience:
+
+### 1. **Unified CLI-Based LLM Client with Retry Logic**
+- ✅ Routes to CLI binaries (claude, gemini, qwen, gpt, glm)
+- ✅ Exponential backoff retry (3 attempts: 2s, 4s, 8s delays)
+- ✅ Graceful failure handling (no pipeline crashes)
+- ✅ Provider verification at startup
+- 📝 Configure: `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TIMEOUT` in `.env`
+
+### 2. **Dynamic Cluster Count Selection**
+- ✅ Auto-detects optimal cluster count using silhouette analysis
+- ✅ Tests k from 2 to 10, selects best
+- ✅ CLI flag: `--clusters auto` or `--clusters 5`
+- 📊 Handles edge cases (< 3 papers)
+
+### 3. **Multi-Format Output Export**
+- ✅ LaTeX (default), Markdown, Word formats
+- ✅ CLI flag: `--format latex|markdown|docx|all`
+- 📄 Output: `state_of_the_art.tex`, `.md`, `.docx`
+- 🎨 Word docs with styled formatting (headings, bold, citations)
+
+### 4. **Citation Style Configuration**
+- ✅ Supports IEEE, APA, Chicago, Harvard
+- ✅ Runtime injection into writer prompts
+- ✅ Configure: `CITATION_STYLE=ieee` in `.env`
+- 📚 Style-specific guidelines for LLMs
+
+### 5. **Smart PDF Truncation with Warnings**
+- ✅ Importance scoring (keeps Abstract/Intro/Methods/Results)
+- ✅ Drops References/Appendices first
+- ⚠️ Yellow console warnings with truncation stats
+- 📊 Metadata tracking in artifacts
+
+**Example Commands**:
+```bash
+# Auto-detect clusters, export as Markdown, use APA citations
+python soa_cli.py --clusters auto --format markdown
+# (Set CITATION_STYLE=apa in .env)
+
+# Export all formats at once
+python soa_cli.py --format all
+
+# Manual cluster count override
+python soa_cli.py --clusters 4
+```
+
+See [CHANGELOG.md](CHANGELOG.md) for detailed documentation of all enhancements.
+
+---
+
 ## 📖 Documentation
 
 For detailed documentation, see the [docs/](docs/) directory:

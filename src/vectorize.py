@@ -8,7 +8,6 @@ import faiss
 import json
 import numpy as np
 from pathlib import Path
-from src.toon_utils import load_toon, dump_toon
 
 MODEL = "sentence-transformers/all-MiniLM-L6-v2"
 
@@ -55,11 +54,12 @@ def build_vector_db(extracted_files):
     print(f"[+] Processing {len(extracted_files)} papers")
     for f in extracted_files:
         try:
-            # Support both .toon and .json files
-            if f.suffix == '.toon':
-                paper = load_toon(f)
-            else:
-                with open(f, 'r', encoding='utf-8') as file:
+            # Convert to Path object if it's a string
+            f_path = Path(f) if isinstance(f, str) else f
+            
+            # Load JSON files only
+            if f_path.suffix == '.json':
+                with open(f_path, 'r', encoding='utf-8') as file:
                     paper = json.load(file)
             
             texts.append(build_embedding_text(paper))
@@ -85,7 +85,8 @@ def build_vector_db(extracted_files):
     Path("vector_db").mkdir(exist_ok=True)
     
     faiss.write_index(index, "vector_db/index.faiss")
-    dump_toon(meta, "vector_db/meta.toon")
+    with open("vector_db/meta.json", 'w', encoding='utf-8') as f:
+        json.dump(meta, f, indent=2)
     
     print(f"[✓] Vector DB built: {index.ntotal} papers indexed")
     print(f"[✓] Saved to vector_db/index.faiss")
@@ -100,13 +101,9 @@ def load_vector_db():
     """Load the FAISS index and metadata from disk."""
     index = faiss.read_index("vector_db/index.faiss")
     
-    # Try .toon first, fallback to .json
-    meta_file = Path("vector_db/meta.toon")
-    if meta_file.exists():
-        meta = load_toon(meta_file)
-    else:
-        with open("vector_db/meta.json", "r", encoding='utf-8') as f:
-            meta = json.load(f)
+    # Load JSON metadata
+    with open("vector_db/meta.json", "r", encoding='utf-8') as f:
+        meta = json.load(f)
     
     return index, meta
 
@@ -116,8 +113,8 @@ if __name__ == "__main__":
     import sys
     if len(sys.argv) > 1:
         extracted_path = Path(sys.argv[1])
-        # Support both .toon and .json files
-        files = list(extracted_path.glob("*.toon")) + list(extracted_path.glob("*.json"))
+        # Load JSON files only
+        files = list(extracted_path.glob("*.json"))
         build_vector_db(files)
     else:
         print("Usage: python vectorize.py <path_to_extracted_folder>")

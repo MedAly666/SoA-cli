@@ -8,11 +8,62 @@ import faiss
 import json
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.metrics import silhouette_score
 from pathlib import Path
-from src.toon_utils import load_toon, dump_toon
 
 
-def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/preclusters.json"):
+def find_optimal_clusters(vectors, min_k=2, max_k=10):
+    """
+    Find optimal number of clusters using silhouette analysis.
+    
+    Args:
+        vectors: Embedding vectors (n_samples x n_features)
+        min_k: Minimum number of clusters to try
+        max_k: Maximum number of clusters to try
+        
+    Returns:
+        Tuple of (optimal_k, silhouette_score, all_scores)
+    """
+    n_samples = len(vectors)
+    
+    # Adjust max_k to not exceed n_samples - 1
+    max_k = min(max_k, n_samples - 1)
+    
+    if n_samples < min_k:
+        print(f"  ⚠️  Too few papers ({n_samples}) for clustering, treating as single cluster")
+        return 1, 0.0, {}
+    
+    print(f"  [Silhouette Analysis] Testing k from {min_k} to {max_k}")
+    
+    scores = {}
+    best_k = min_k
+    best_score = -1.0
+    
+    for k in range(min_k, max_k + 1):
+        # Perform clustering
+        clustering = AgglomerativeClustering(
+            n_clusters=k,
+            metric="cosine",
+            linkage="average"
+        )
+        labels = clustering.fit_predict(vectors)
+        
+        # Calculate silhouette score
+        score = silhouette_score(vectors, labels, metric='cosine')
+        scores[k] = score
+        
+        print(f"    k={k}: silhouette={score:.4f}")
+        
+        if score > best_score:
+            best_score = score
+            best_k = k
+    
+    print(f"  ✓ Optimal k={best_k} with silhouette score={best_score:.4f}")
+    
+    return best_k, best_score, scores
+
+
+def run_similarity_clustering(n_clusters=None, output_file="artifacts/clusters/preclusters.json"):
     """
     Perform agglomerative clustering on paper vectors.
     
@@ -20,7 +71,7 @@ def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/prec
     not create them from scratch.
     
     Args:
-        n_clusters: Number of clusters to create
+        n_clusters: Number of clusters to create. If None, auto-detect optimal k.
         output_file: Where to save the cluster assignments
         
     Returns:
@@ -29,18 +80,47 @@ def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/prec
     print(f"[+] Loading vector database")
     index = faiss.read_index("vector_db/index.faiss")
     
-    # Try .toon first, fallback to .json
-    meta_file = Path("vector_db/meta.toon")
-    if meta_file.exists():
-        meta = load_toon(meta_file)
-    else:
-        with open("vector_db/meta.json", "r", encoding='utf-8') as f:
-            meta = json.load(f)
+    # Load JSON metadata
+    with open("vector_db/meta.json", "r", encoding='utf-8') as f:
+        meta = json.load(f)
+    
+    n_papers = len(meta)
+    print(f"[+] Found {n_papers} papers")
+    
+    # Handle edge case: too few papers for clustering
+    if n_papers < 3:
+        print(f"  ⚠️  Warning: Only {n_papers} paper(s) - treating as single cluster")
+        clusters = {"C0": [paper["paper_id"] for paper in meta]}
+        
+        # Save to disk
+        Path(output_file).parent.mkdir(parents=True, exist_ok=True)
+        if not output_file.endswith('.json'):
+            output_file = output_file + '.json'
+        
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(clusters, f, indent=2)
+        
+        print(f"[✓] Created 1 cluster with {n_papers} paper(s)")
+        print(f"[✓] Saved to {output_file}")
+        return clusters
     
     print(f"[+] Reconstructing vectors from FAISS index")
     vectors = np.zeros((index.ntotal, index.d), dtype='float32')
     for i in range(index.ntotal):
         vectors[i] = index.reconstruct(i)
+    
+    # Auto-detect optimal k if not specified
+    if n_clusters is None:
+        print(f"[+] Auto-detecting optimal number of clusters...")
+        n_clusters, silhouette, all_scores = find_optimal_clusters(
+            vectors,
+            min_k=2,
+            max_k=min(10, n_papers - 1)
+        )
+    else:
+        # Manual override - still show silhouette score
+        print(f"[+] Using manually specified n_clusters={n_clusters}")
+        silhouette = None
     
     print(f"[+] Running agglomerative clustering (n_clusters={n_clusters})")
     clustering = AgglomerativeClustering(
@@ -50,6 +130,11 @@ def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/prec
     )
     
     labels = clustering.fit_predict(vectors)
+    
+    # Calculate silhouette score if not already done
+    if silhouette is None and n_clusters > 1:
+        silhouette = silhouette_score(vectors, labels, metric='cosine')
+        print(f"  Silhouette score: {silhouette:.4f}")
     
     # Group papers by cluster
     clusters = {}
@@ -61,13 +146,15 @@ def run_similarity_clustering(n_clusters=6, output_file="artifacts/clusters/prec
     
     # Save to disk
     Path(output_file).parent.mkdir(parents=True, exist_ok=True)
-    # Change extension to .toon if it was .json
-    if output_file.endswith('.json'):
-        output_file = output_file.replace('.json', '.toon')
-    dump_toon(clusters, output_file)
+    # Save as JSON
+    if not output_file.endswith('.json'):
+        output_file = output_file + '.json'
+    
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(clusters, f, indent=2)
     
     print(f"[✓] Clustered {len(meta)} papers into {len(clusters)} clusters")
-    for cid, papers in clusters.items():
+    for cid, papers in sorted(clusters.items()):
         print(f"    {cid}: {len(papers)} papers")
     
     print(f"[✓] Saved to {output_file}")
@@ -88,9 +175,13 @@ def get_cluster_summary(clusters):
 if __name__ == "__main__":
     import sys
     
-    n = 6  # Default number of clusters
+    n = None  # Auto-detect by default
     if len(sys.argv) > 1:
-        n = int(sys.argv[1])
+        arg = sys.argv[1]
+        if arg.lower() == 'auto':
+            n = None  # Explicit auto-detect
+        else:
+            n = int(arg)
     
     clusters = run_similarity_clustering(n_clusters=n)
     summary = get_cluster_summary(clusters)
