@@ -56,7 +56,10 @@ def parse_semantic_pdf(pdf_path: str, extract_images: bool = True, max_chars: Op
     
     # Step 3: Extract figures with captions
     figures = extract_figures_with_captions(doc, extract_images=extract_images)
-    print(f"    ✓ Figures: {len(figures)} extracted")
+    if len(figures) == 0:
+        print(f"    ℹ️  Note: No raster images found (figures may be vector graphics)")
+    else:
+        print(f"    ✓ Figures: {len(figures)} extracted")
     
     # Step 4: Extract tables
     tables = extract_tables_from_pdf(pdf_path)
@@ -229,7 +232,25 @@ def extract_figures_with_captions(doc, extract_images: bool = True) -> List[dict
         
         for img_index, img in enumerate(image_list):
             xref = img[0]
-            bbox = list(img[1:5])  # Bounding box [x0, y0, x1, y1]
+            
+            # Get actual bounding box(es) for this image on the page
+            # An image can appear multiple times (e.g., in header/footer)
+            try:
+                image_rects = page.get_image_rects(xref)
+                if not image_rects:
+                    continue
+                
+                # Use the first/largest occurrence
+                bbox = list(image_rects[0]) if image_rects else None
+                if not bbox:
+                    continue
+                    
+            except Exception as e:
+                # Fallback: try get_image_bbox
+                try:
+                    bbox = list(page.get_image_bbox(xref))
+                except:
+                    continue
             
             # Skip very small images (likely icons/logos)
             width = bbox[2] - bbox[0]

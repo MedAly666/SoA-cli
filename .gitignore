@@ -43,6 +43,9 @@ artifacts/extracted/*.toon
 artifacts/extracted_filtered/*.json
 artifacts/extracted_filtered/*.toon
 
+artifacts/extracted_facts/*.json
+artifacts/extracted_facts/*.toon
+
 artifacts/critic/*.json
 artifacts/critic/*.toon
 

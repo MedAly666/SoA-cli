@@ -10,9 +10,127 @@ to focus only on globally relevant information.
 import json
 import subprocess
 from pathlib import Path
+import sys
 
 
 THEME_CONTRACT_FILE = "THEMATIC_CONTRACT.json"
+THEME_INPUT_REQUIRED_FIELDS = [
+    "title",
+    "research_goals",
+    "specific_constraints",
+    "what_to_exclude"
+]
+
+
+def _validate_theme_input(data: dict) -> None:
+    """Validate generated theme_input structure."""
+    if not isinstance(data, dict):
+        raise ValueError("theme_input must be a JSON object")
+
+    for field in THEME_INPUT_REQUIRED_FIELDS:
+        if field not in data:
+            raise ValueError(f"theme_input missing required field: {field}")
+
+    if not isinstance(data["title"], str) or not data["title"].strip():
+        raise ValueError("theme_input.title must be a non-empty string")
+
+    for list_field in ["research_goals", "specific_constraints", "what_to_exclude"]:
+        value = data[list_field]
+        if not isinstance(value, list) or not value:
+            raise ValueError(f"theme_input.{list_field} must be a non-empty list")
+        if not all(isinstance(item, str) and item.strip() for item in value):
+            raise ValueError(f"theme_input.{list_field} must contain non-empty strings")
+
+
+def _prompt_user_theme_description() -> str:
+    """Prompt user for a short natural language theme description."""
+    print("\n[Theme Setup] theme_input.json not found.")
+    print("Please enter a short description of your research theme.")
+    print("Example: 'Analyze multimodal impact of ASR/OCR transcription errors on downstream NLP tasks.'")
+
+    while True:
+        description = input("\nTheme description: ").strip()
+        if len(description) >= 10:
+            return description
+        print("[!] Description is too short. Please provide a bit more detail.")
+
+
+def _generate_theme_input_from_description(description: str, output_file: str, model=None) -> dict:
+    """Generate theme_input.json from natural language description using LLM."""
+    from src.llm_client import LLMClient
+
+    system_prompt = """You convert a short research theme description into a strict JSON object.
+
+Return ONLY valid JSON with this exact schema:
+{
+  "title": "string",
+  "research_goals": ["string", "string", "string", ...],
+  "specific_constraints": ["string", "string", ...],
+  "what_to_exclude": ["string", "string", ...]
+}
+
+Rules:
+- title: concise and academic
+- research_goals: 4-7 concrete goals
+- specific_constraints: 3-6 constraints
+- what_to_exclude: 3-6 exclusions
+- No markdown, no explanation, no extra keys"""
+
+    user_prompt = f"""Theme description:
+{description}
+
+Generate theme_input.json now."""
+
+    client = LLMClient(model=model, timeout=120)
+    output_text = client.call(system_prompt, user_prompt)
+
+    if output_text.startswith("__LLM_FAILURE__:"):
+        raise RuntimeError(f"Failed to generate theme input from description: {output_text}")
+
+    json_start = output_text.find('{')
+    json_end = output_text.rfind('}') + 1
+    if json_start >= 0 and json_end > json_start:
+        output_text = output_text[json_start:json_end]
+
+    generated = json.loads(output_text)
+    _validate_theme_input(generated)
+
+    with open(output_file, 'w', encoding='utf-8') as f:
+        json.dump(generated, f, indent=2)
+
+    print(f"[✓] Generated {output_file} from your description")
+    return generated
+
+
+def ensure_theme_input(user_input_file: str = "theme_input.json", model=None) -> dict:
+    """Ensure theme_input.json exists; generate it interactively if missing."""
+    input_path = Path(user_input_file)
+
+    if input_path.exists():
+        with open(input_path, 'r', encoding='utf-8') as f:
+            user_input = json.load(f)
+        _validate_theme_input(user_input)
+        return user_input
+
+    if not sys.stdin.isatty():
+        create_theme_input_template(user_input_file)
+        raise RuntimeError(
+            f"{user_input_file} not found and interactive input is unavailable. "
+            f"Template created at {user_input_file}; please fill it and run again."
+        )
+
+    description = _prompt_user_theme_description()
+
+    try:
+        return _generate_theme_input_from_description(description, user_input_file, model=model)
+    except Exception as e:
+        print(f"[!] Could not auto-generate {user_input_file}: {e}")
+        print("[+] Creating editable template as fallback...")
+        create_theme_input_template(user_input_file)
+        raise RuntimeError(
+            f"Auto-generation failed. Template created at {user_input_file}; "
+            f"please edit it and rerun."
+        )
 
 
 def build_thematic_contract(user_input_file="theme_input.json", model=None):
@@ -33,18 +151,8 @@ def build_thematic_contract(user_input_file="theme_input.json", model=None):
     print("STAGE 0: BUILDING THEMATIC CONTRACT")
     print("="*60)
     
-    # Check if user input exists
-    if not Path(user_input_file).exists():
-        print(f"[!] Theme input not found: {user_input_file}")
-        print("[+] Creating template...")
-        create_theme_input_template(user_input_file)
-        print(f"\n[!] Please edit {user_input_file} with your research scope")
-        print("[!] Then run the pipeline again")
-        raise RuntimeError("Thematic contract requires user input")
-    
-    # Load user input
-    with open(user_input_file, 'r', encoding='utf-8') as f:
-        user_input = json.load(f)
+    # Ensure user input exists (interactive generation if missing)
+    user_input = ensure_theme_input(user_input_file, model=model)
     
     print(f"[+] Loaded research scope definition")
     print(f"    Title: {user_input.get('title', 'Not specified')}")
@@ -121,7 +229,7 @@ Generate a thematic contract based on the above input. Return ONLY valid JSON wi
         
     except json.JSONDecodeError as e:
         print(f"[!] Failed to parse JSON from Qwen output: {e}")
-        print(f"[!] Raw output: {result.stdout[:500]}")
+        print(f"[!] Raw output: {output_text[:500]}")
         raise
     except Exception as e:
         print(f"[!] Error building thematic contract: {e}")
