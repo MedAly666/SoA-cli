@@ -14,6 +14,7 @@ from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 import fitz  # PyMuPDF
+import os
 
 from .state import SOAState
 
@@ -25,6 +26,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from theme_builder import build_thematic_contract, inject_theme_into_input
 from vectorize import build_vector_db
 from similarity_cluster import run_similarity_clustering
+
+# Import semantic PDF parser
+try:
+    from src.pdf_parser import parse_semantic_pdf, semantic_pdf_to_text
+    SEMANTIC_PDF_AVAILABLE = True
+except ImportError:
+    SEMANTIC_PDF_AVAILABLE = False
+    print("⚠️  Semantic PDF parser not available, falling back to text-only extraction")
 
 
 def inject_contract(data: dict, contract: dict) -> dict:
@@ -181,6 +190,81 @@ def _select_important_pages(all_pages: list, max_chars: int) -> list:
     # Sort back by page number
     selected.sort(key=lambda p: p['page_num'])
     return selected
+
+
+def extract_pdf_content(pdf_path: str, max_chars: int | None = None) -> tuple[str, dict]:
+    """
+    Extract PDF content using either semantic parser or legacy text extraction.
+    
+    Semantic parser (when USE_SEMANTIC_PDF=true):
+        - Extracts sections with structure
+        - Preserves figures with captions
+        - Extracts tables with data
+        - Maintains context and relationships
+        
+    Legacy text extraction (when USE_SEMANTIC_PDF=false):
+        - Plain text extraction only
+        - No figures or tables
+        - Simpler but loses 60-80% of information
+    
+    Args:
+        pdf_path: Path to PDF file
+        max_chars: Maximum characters to extract
+        
+    Returns:
+        Tuple of (extracted_text, metadata_dict)
+    """
+    use_semantic = os.getenv('USE_SEMANTIC_PDF', 'true').lower() == 'true'
+    
+    if use_semantic and SEMANTIC_PDF_AVAILABLE:
+        # Use semantic PDF parser
+        try:
+            include_figures = os.getenv('INCLUDE_FIGURES_IN_TEXT', 'true').lower() == 'true'
+            include_tables = os.getenv('INCLUDE_TABLES_IN_TEXT', 'true').lower() == 'true'
+            extract_images = os.getenv('EXTRACT_PDF_IMAGES', 'false').lower() == 'true'
+            
+            if max_chars is None:
+                max_chars = int(os.getenv('MAX_PDF_CHARS', '50000'))
+            
+            # Parse PDF into semantic structure
+            semantic_pdf = parse_semantic_pdf(pdf_path, extract_images=extract_images, max_chars=max_chars)
+            
+            # Convert to text for LLM
+            pdf_text = semantic_pdf_to_text(
+                semantic_pdf,
+                include_figures=include_figures,
+                include_tables=include_tables
+            )
+            
+            # Build metadata
+            metadata = {
+                'extraction_mode': 'semantic',
+                'truncated': semantic_pdf.get('truncated', False),
+                'total_chars': len(pdf_text),
+                'sections': len(semantic_pdf.get('sections', [])),
+                'figures': len(semantic_pdf.get('figures_index', {})),
+                'tables': len(semantic_pdf.get('tables_index', {}))
+            }
+            
+            return pdf_text, metadata
+            
+        except Exception as e:
+            print(f"  ⚠️  Semantic parsing failed: {e}")
+            print("  ↳ Falling back to text-only extraction")
+            # Fall back to text-only
+            return extract_pdf_text(pdf_path, max_chars)
+    
+    else:
+        # Use legacy text-only extraction
+        if use_semantic and not SEMANTIC_PDF_AVAILABLE:
+            print("  ⚠️  Semantic PDF parser not available, using text-only extraction")
+        
+        text, truncation_info = extract_pdf_text(pdf_path, max_chars)
+        metadata = {
+            'extraction_mode': 'text_only',
+            **truncation_info
+        }
+        return text, metadata
 
 
 def call_llm(system_prompt_path: str, input_data: dict, output_path: str) -> str:
@@ -346,8 +430,8 @@ def reader_map_node(state: SOAState) -> dict:
         output_path = f"artifacts/reader/{paper_id}.json"
         
         try:
-            # Extract PDF text (now returns tuple with truncation info)
-            pdf_text, truncation_info = extract_pdf_text(path)
+            # Extract PDF content (semantic or text-only based on config)
+            pdf_text, extraction_metadata = extract_pdf_content(path)
             
             # Save to temp file for LLM
             temp_input = f"artifacts/reader/_temp_{paper_id}.txt"
@@ -368,16 +452,21 @@ def reader_map_node(state: SOAState) -> dict:
             result = json.loads(output_text)
             result["paper_id"] = paper_id
             
-            # Add truncation metadata if truncation occurred
-            if truncation_info and truncation_info.get('truncated', False):
-                result["truncation_warning"] = {
-                    "message": f"PDF was truncated from {truncation_info['original_chars']:,} to {truncation_info['final_chars']:,} chars ({truncation_info['lost_percentage']:.1f}% lost)",
-                    "original_chars": truncation_info['original_chars'],
-                    "final_chars": truncation_info['final_chars'],
-                    "lost_percentage": truncation_info['lost_percentage']
-                }
+            # Add extraction metadata
+            result["extraction_metadata"] = extraction_metadata
             
-            print(f"  ✓ {paper_id}")
+            # Add warning if content was truncated or semantic parsing was used
+            if extraction_metadata.get('extraction_mode') == 'semantic':
+                sections = extraction_metadata.get('sections', 0)
+                figures = extraction_metadata.get('figures', 0)
+                tables = extraction_metadata.get('tables', 0)
+                print(f"  ✓ {paper_id} [Semantic: {sections} sections, {figures} figures, {tables} tables]")
+            elif extraction_metadata.get('truncated', False):
+                lost_pct = extraction_metadata.get('lost_percentage', 0)
+                print(f"  ✓ {paper_id} [Truncated: {lost_pct:.1f}% lost]")
+            else:
+                print(f"  ✓ {paper_id}")
+            
             return paper_id, result
             
         except Exception as e:
