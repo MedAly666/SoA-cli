@@ -34,6 +34,7 @@ class SOAState(TypedDict):
     clusters: Optional[dict]  # LLM-interpreted clusters
     synthesis: Optional[dict]  # Cross-paper synthesis
     soa_draft: Optional[str]  # Current version of LaTeX SoA
+    prisma_metadata: Optional[dict]  # PRISMA search methodology metadata (if papers auto-fetched)
     
     # ===== VERIFICATION & REPAIR =====
     verification_results: Optional[list[dict]]  # Hallucination violations

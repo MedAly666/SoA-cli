@@ -78,10 +78,10 @@ def run_similarity_clustering(n_clusters=None, output_file="artifacts/clusters/p
         Dictionary mapping cluster IDs to paper IDs
     """
     print(f"[+] Loading vector database")
-    index = faiss.read_index("vector_db/index.faiss")
+    index = faiss.read_index("artifacts/vector_db/index.faiss")
     
     # Load JSON metadata
-    with open("vector_db/meta.json", "r", encoding='utf-8') as f:
+    with open("artifacts/vector_db/meta.json", "r", encoding='utf-8') as f:
         meta = json.load(f)
     
     n_papers = len(meta)

@@ -71,8 +71,11 @@ def run_repair_agent(sentence, issue, evidence):
     }
     
     # Load system prompt
+    from pathlib import Path
+    
     try:
-        with open("prompts/repair.system.txt", "r", encoding='utf-8') as f:
+        prompt_path = Path("prompts/repair.system.txt")
+        with open(prompt_path, "r", encoding='utf-8') as f:
             system_prompt = f.read()
     except FileNotFoundError:
         print("[!] Repair system prompt not found")

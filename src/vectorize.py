@@ -44,7 +44,7 @@ def build_vector_db(extracted_files):
         extracted_files: List of paths to extracted JSON files
         
     Returns:
-        None (writes to disk: vector_db/index.faiss and vector_db/meta.json)
+        None (writes to disk: artifacts/vector_db/index.faiss and artifacts/vector_db/meta.json)
     """
     print(f"[+] Loading embedding model: {MODEL}")
     model = SentenceTransformer(MODEL)
@@ -82,14 +82,14 @@ def build_vector_db(extracted_files):
     index.add(np.array(embeddings).astype('float32'))
     
     # Save to disk
-    Path("vector_db").mkdir(exist_ok=True)
+    Path("artifacts/vector_db").mkdir(parents=True, exist_ok=True)
     
-    faiss.write_index(index, "vector_db/index.faiss")
-    with open("vector_db/meta.json", 'w', encoding='utf-8') as f:
+    faiss.write_index(index, "artifacts/vector_db/index.faiss")
+    with open("artifacts/vector_db/meta.json", 'w', encoding='utf-8') as f:
         json.dump(meta, f, indent=2)
     
     print(f"[✓] Vector DB built: {index.ntotal} papers indexed")
-    print(f"[✓] Saved to vector_db/index.faiss")
+    print(f"[✓] Saved to artifacts/vector_db/index.faiss")
 
 
 def get_embedder():
@@ -99,10 +99,10 @@ def get_embedder():
 
 def load_vector_db():
     """Load the FAISS index and metadata from disk."""
-    index = faiss.read_index("vector_db/index.faiss")
+    index = faiss.read_index("artifacts/vector_db/index.faiss")
     
     # Load JSON metadata
-    with open("vector_db/meta.json", "r", encoding='utf-8') as f:
+    with open("artifacts/vector_db/meta.json", "r", encoding='utf-8') as f:
         meta = json.load(f)
     
     return index, meta

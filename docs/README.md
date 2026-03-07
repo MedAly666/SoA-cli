@@ -186,7 +186,7 @@ python3 soa_cli.py --papers /path/to/pdfs  # Custom directory
 ### Verification Failures
 ```bash
 # Check verification results
-cat artifacts/final_state.json | jq '.verification_results'
+cat artifacts/states/final_state.json | jq '.verification_results'
 
 # Increase repair iterations
 python3 soa_cli.py --max-repair 5

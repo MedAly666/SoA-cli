@@ -96,7 +96,7 @@ All intermediate outputs are saved in `artifacts/`:
 ls artifacts/extracted/*.json | wc -l
 
 # Check current state
-cat artifacts/final_state.json | jq '.pipeline_stage'
+cat artifacts/states/final_state.json | jq '.pipeline_stage'
 
 # Check clustering
 cat artifacts/clusters/preclusters.json

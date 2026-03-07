@@ -78,7 +78,7 @@ python3 soa_cli.py --resume --thread-id my-session
 
 ```
 STATE_OF_THE_ART.tex           # Final output (root)
-artifacts/final_state.json     # Complete state
+artifacts/states/final_state.json     # Complete state
 artifacts/soa/state_of_the_art.tex  # Draft LaTeX
 ```
 

@@ -20,35 +20,89 @@ from src.graph.builder import compile_graph
 from src.graph.state import SOAState
 
 
-def load_paper_paths(papers_dir: str = "papers") -> list[str]:
+def load_paper_paths(papers_dir: str = "papers", allow_empty: bool = False) -> list[str]:
     """Load all PDF paths from papers directory."""
     papers_path = Path(papers_dir)
     if not papers_path.exists():
+        if allow_empty:
+            # Create directory if it doesn't exist
+            papers_path.mkdir(parents=True, exist_ok=True)
+            return []
         raise FileNotFoundError(f"Papers directory not found: {papers_dir}")
     
     pdf_files = list(papers_path.glob("*.pdf"))
     
     if not pdf_files:
+        if allow_empty:
+            return []
         raise FileNotFoundError(f"No PDF files found in {papers_dir}")
     
     return [str(p.absolute()) for p in sorted(pdf_files)]
 
 
 def clear_artifacts():
-    """Remove all artifacts to force a fresh run."""
+    """
+    Clear all artifacts while preserving directory structure and .gitkeep files.
+    Removes all files from artifacts/ subdirectories but keeps the folders themselves.
+    """
     import shutil
     
     artifacts_dir = Path("artifacts")
-    if artifacts_dir.exists():
-        print("\n[Clean] Removing existing artifacts...")
-        try:
-            shutil.rmtree(artifacts_dir)
-            print("  ✓ All artifacts cleared")
-        except Exception as e:
-            print(f"  ✗ Failed to clear artifacts: {e}")
-            raise
-    else:
+    if not artifacts_dir.exists():
         print("\n[Clean] No artifacts to clear")
+        return
+    
+    print("\n[Clean] Clearing artifact files (preserving folders and .gitkeep)...")
+    
+    # Directories to clean
+    subdirs_to_clean = [
+        "states",
+        "prisma",
+        "reader",
+        "extracted",
+        "extracted_facts",
+        "extracted_filtered",
+        "extractions",
+        "critic",
+        "clusters",
+        "synthesis",
+        "soa",
+        "vector_db"
+    ]
+    
+    files_deleted = 0
+    
+    # Clean each subdirectory
+    for subdir in subdirs_to_clean:
+        subdir_path = artifacts_dir / subdir
+        if subdir_path.exists():
+            # Delete all files except .gitkeep
+            for item in subdir_path.iterdir():
+                if item.is_file() and item.name != ".gitkeep":
+                    try:
+                        item.unlink()
+                        files_deleted += 1
+                    except Exception as e:
+                        print(f"  ✗ Failed to delete {item}: {e}")
+                elif item.is_dir():
+                    # Recursively delete subdirectories (e.g., temp files)
+                    try:
+                        shutil.rmtree(item)
+                        files_deleted += 1
+                    except Exception as e:
+                        print(f"  ✗ Failed to delete {item}: {e}")
+    
+    # Also clean root-level files in artifacts/ (except .gitkeep)
+    for item in artifacts_dir.iterdir():
+        if item.is_file() and item.name != ".gitkeep":
+            try:
+                item.unlink()
+                files_deleted += 1
+            except Exception as e:
+                print(f"  ✗ Failed to delete {item}: {e}")
+    
+    print(f"  ✓ Cleared {files_deleted} artifact files")
+    print(f"  ✓ Preserved folder structure and .gitkeep files")
 
 
 def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, list[str]]:
@@ -118,9 +172,10 @@ def load_existing_artifacts(paper_paths: list[str]) -> tuple[dict, dict, dict, l
 def create_initial_state(
     paper_paths: list[str], 
     max_repair: int = 3,
-    existing_reader: dict = None,
-    existing_extracted: dict = None,
-    existing_critic: dict = None
+    existing_reader: Optional[dict] = None,
+    existing_extracted: Optional[dict] = None,
+    existing_critic: Optional[dict] = None,
+    prisma_metadata: Optional[dict] = None
 ) -> SOAState:
     """
     Create initial state for the graph.
@@ -131,6 +186,7 @@ def create_initial_state(
         existing_reader: Pre-loaded reader outputs
         existing_extracted: Pre-loaded extracted facts
         existing_critic: Pre-loaded critic assessments
+        prisma_metadata: PRISMA search methodology metadata (if papers auto-fetched)
     
     Returns:
         Initial state dictionary
@@ -153,6 +209,7 @@ def create_initial_state(
         "clusters": None,
         "synthesis": None,
         "soa_draft": None,
+        "prisma_metadata": prisma_metadata,
         
         # Verification
         "verification_results": None,
@@ -192,7 +249,76 @@ def run_pipeline(
     print("=" * 60)
     
     print(f"\n[Setup] Loading papers from {papers_dir}...")
-    all_paper_paths = load_paper_paths(papers_dir)
+    all_paper_paths = load_paper_paths(papers_dir, allow_empty=True)
+    
+    # Load PRISMA metadata if available
+    prisma_metadata = None
+    candidates_file = Path("paper_candidates.json")
+    if candidates_file.exists():
+        try:
+            with open(candidates_file, 'r', encoding='utf-8') as f:
+                candidates_data = json.load(f)
+                search_metadata = candidates_data.get('search_metadata', {})
+                
+                # Transform to PRISMA report format
+                if search_metadata:
+                    prisma_metadata = {
+                        "identification": {
+                            "total_records": search_metadata.get('total_identified', 0),
+                            "by_source": {},  # Could be extracted if stored
+                            "search_date": search_metadata.get('search_date', ''),
+                            "queries": search_metadata.get('queries_used', [])
+                        },
+                        "screening": {
+                            "duplicates_removed": search_metadata.get('duplicates_removed', 0),
+                            "records_screened": search_metadata.get('screened', 0),
+                            "excluded_abstract": search_metadata.get('total_identified', 0) - search_metadata.get('screened', 0)
+                        },
+                        "eligibility": {
+                            "full_text_assessed": search_metadata.get('screened', 0),
+                            "excluded_full_text": search_metadata.get('screened', 0) - search_metadata.get('eligible', 0)
+                        },
+                        "included": {
+                            "total_included": search_metadata.get('eligible', 0)
+                        },
+                        "databases": search_metadata.get('databases', []),
+                        "total_papers": len(all_paper_paths)
+                    }
+                    print("  ✓ PRISMA methodology metadata loaded")
+        except Exception as e:
+            print(f"  ⚠️  Could not load PRISMA metadata: {e}")
+    
+    # If no papers found, trigger automatic paper search
+    if not all_paper_paths:
+        print(f"  ⚠️  No papers found in {papers_dir}")
+        print("\n" + "="*60)
+        print("AUTOMATIC PAPER SEARCH")
+        print("="*60)
+        print("\nNo papers detected. Initiating PRISMA paper search...")
+        
+        try:
+            # Run paper search
+            search_papers_command(auto_download=False)
+            
+            print("\n" + "="*60)
+            print("PAPER SEARCH COMPLETE - ACTION REQUIRED")
+            print("="*60)
+            print("\n📋 Next steps:")
+            print("  1. Review candidates: paper_candidates.json")
+            print("  2. Edit 'status' field: 'approved' or 'rejected'")
+            print("  3. Download papers: python soa_cli.py --download-papers")
+            print("  4. Run pipeline again: python soa_cli.py")
+            print("\nExiting. Please review candidates and download papers.\n")
+            sys.exit(0)
+        
+        except Exception as e:
+            print(f"\n✗ Paper search failed: {e}")
+            print("\nAlternatives:")
+            print(f"  1. Manually add PDFs to {papers_dir}/")
+            print(f"  2. Run: python soa_cli.py --search-papers")
+            print(f"  3. Fix the error and try again\n")
+            sys.exit(1)
+    
     print(f"  Found {len(all_paper_paths)} papers")
     
     # Check for existing artifacts and load them
@@ -234,7 +360,8 @@ def run_pipeline(
             max_repair,
             existing_reader,    # Pre-loaded data
             existing_extracted,
-            existing_critic
+            existing_critic,
+            prisma_metadata     # PRISMA metadata if available
         )
         
         # Save initial state
@@ -271,7 +398,8 @@ def run_pipeline(
     print(f"Repair iterations: {final_state.get('repair_iteration', 0)}/{final_state.get('max_repair_iterations', 0)}")
     
     # Save final state
-    output_file = "artifacts/final_state.json"
+    Path("artifacts/states").mkdir(parents=True, exist_ok=True)
+    output_file = "artifacts/states/final_state.json"
     # Only save serializable parts
     serializable_state = {
         k: v for k, v in final_state.items()
@@ -341,6 +469,190 @@ def run_pipeline(
     return final_state
 
 
+def search_papers_command(auto_download: bool = False):
+    """Execute paper search with PRISMA methodology."""
+    from src.paper_fetcher import PRISMAPaperFetcher
+    from src.theme_builder import ensure_theme_input, build_thematic_contract
+    
+    print("\n" + "="*80)
+    print("PRISMA PAPER SEARCH")
+    print("="*80)
+    
+    # Ensure theme_input.json exists
+    print("\n[Setup] Loading thematic contract...")
+    user_input_file = "theme_input.json"
+    
+    try:
+        # Use None to let functions create their own LLMClient with proper settings
+        user_input = ensure_theme_input(user_input_file, model=None)
+        
+        # Build thematic contract (pass filename, not dict)
+        contract = build_thematic_contract(user_input_file, model=None)
+        print(f"  ✓ Theme: {contract.get('global_theme', 'N/A')}")
+    
+    except Exception as e:
+        print(f"\n✗ Failed to load thematic contract: {e}")
+        sys.exit(1)
+    
+    # Load paper fetcher configuration from environment
+    config = {
+        'sources': os.getenv('PAPER_SOURCES', 'semantic_scholar,arxiv').split(','),
+        'max_papers': int(os.getenv('PAPER_MAX_RESULTS', '50')),
+        'min_year': int(os.getenv('PAPER_MIN_YEAR', '2015')),
+        'min_citations': int(os.getenv('PAPER_MIN_CITATIONS', '10')),
+        'require_venue_whitelist': os.getenv('PAPER_REQUIRE_WHITELIST', 'true').lower() == 'true'
+    }
+    
+    print("\n[Config]:")
+    print(f"  Sources: {', '.join(config['sources'])}")
+    print(f"  Max papers: {config['max_papers']}")
+    print(f"  Min year: {config['min_year']}")
+    print(f"  Min citations: {config['min_citations']}")
+    print(f"  Venue whitelist: {'Required' if config['require_venue_whitelist'] else 'Optional'}")
+    
+    # Run PRISMA search
+    fetcher = PRISMAPaperFetcher(contract, config)
+    report = fetcher.run_systematic_search(auto_download=auto_download)
+    
+    print("\n" + "="*80)
+    print("✓ PAPER SEARCH COMPLETE")
+    print("="*80)
+    
+    return report
+
+
+def download_papers_command():
+    """Download approved papers from candidates file."""
+    from src.paper_fetcher import PRISMAPaperFetcher, PaperCandidate
+    
+    print("\n" + "="*80)
+    print("DOWNLOAD APPROVED PAPERS")
+    print("="*80)
+    
+    candidates_file = "paper_candidates.json"
+    
+    if not Path(candidates_file).exists():
+        print(f"\n✗ Candidates file not found: {candidates_file}")
+        print("  Run --search-papers first to generate candidates")
+        sys.exit(1)
+    
+    # Load candidates
+    with open(candidates_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    candidates = data.get('candidates', [])
+    
+    # Filter approved papers
+    approved = [c for c in candidates if c.get('status') == 'approved']
+    
+    if not approved:
+        print(f"\n⚠ No approved papers found in {candidates_file}")
+        print("  Edit the 'status' field to 'approved' for papers you want to download")
+        sys.exit(0)
+    
+    print(f"\n[Download] Found {len(approved)} approved papers")
+    
+    # Convert to PaperCandidate objects
+    from dataclasses import fields
+    paper_objects = []
+    
+    for c in approved:
+        # Only pass fields that exist in PaperCandidate
+        valid_fields = {f.name for f in fields(PaperCandidate)}
+        filtered_data = {k: v for k, v in c.items() if k in valid_fields}
+        
+        try:
+            paper = PaperCandidate(**filtered_data)
+            paper_objects.append(paper)
+        except Exception as e:
+            print(f"  ⚠ Error loading paper '{c.get('title', 'Unknown')}': {e}")
+    
+    # Download papers
+    dummy_config = {'sources': [], 'max_papers': 0}
+    fetcher = PRISMAPaperFetcher({}, dummy_config)
+    
+    included = fetcher.inclusion_stage(paper_objects)
+    
+    print(f"\n✓ Successfully downloaded {len(included)} papers to papers/")
+    
+    # Update candidates file with download status
+    for candidate in candidates:
+        for paper in included:
+            if candidate.get('title') == paper.title:
+                candidate['status'] = 'included'
+                candidate['pdf_path'] = paper.pdf_path
+    
+    with open(candidates_file, 'w', encoding='utf-8') as f:
+        json.dump(data, f, indent=2)
+    
+    print(f"✓ Candidates file updated: {candidates_file}")
+
+
+def prisma_report_command():
+    """Generate PRISMA report from candidates file."""
+    print("\n" + "="*80)
+    print("GENERATE PRISMA REPORT")
+    print("="*80)
+    
+    candidates_file = "paper_candidates.json"
+    
+    if not Path(candidates_file).exists():
+        print(f"\n✗ Candidates file not found: {candidates_file}")
+        print("  Run --search-papers first to generate candidates")
+        sys.exit(1)
+    
+    # Load candidates
+    with open(candidates_file, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+    
+    metadata = data.get('search_metadata', {})
+    
+    # Reconstruct report from metadata
+    report = {
+        "identification": {
+            "total_records": metadata.get('total_identified', 0),
+            "by_source": {},
+            "search_date": metadata.get('search_date', ''),
+            "queries": metadata.get('queries_used', [])
+        },
+        "screening": {
+            "duplicates_removed": metadata.get('duplicates_removed', 0),
+            "records_screened": metadata.get('screened', 0),
+            "excluded_abstract": 0
+        },
+        "eligibility": {
+            "full_text_assessed": metadata.get('screened', 0),
+            "excluded_full_text": 0
+        },
+        "included": {
+            "total_included": metadata.get('eligible', 0)
+        }
+    }
+    
+    # Count exclusions
+    candidates = data.get('candidates', [])
+    for c in candidates:
+        if c.get('status') == 'excluded':
+            if c.get('exclusion_stage') == 'screening':
+                report['screening']['excluded_abstract'] += 1
+            else:
+                report['eligibility']['excluded_full_text'] += 1
+    
+    # Save report
+    Path("artifacts").mkdir(exist_ok=True)
+    with open("artifacts/prisma_report.json", 'w', encoding='utf-8') as f:
+        json.dump(report, f, indent=2)
+    
+    print(f"\n✓ PRISMA report saved: artifacts/prisma_report.json")
+    
+    # Generate flow diagram (simplified version without full fetcher)
+    from src.paper_fetcher import PRISMAPaperFetcher
+    fetcher = PRISMAPaperFetcher({}, {})
+    fetcher.generate_prisma_flow_diagram(report)
+    
+    print("\n✓ PRISMA REPORT COMPLETE")
+
+
 def main():
     """Main entry point."""
     import argparse
@@ -353,6 +665,8 @@ def main():
     parser = argparse.ArgumentParser(
         description="SOA-CLI: Automated State of the Art generation with LangGraph"
     )
+    
+    # Main pipeline arguments
     parser.add_argument(
         "--papers",
         type=str,
@@ -395,9 +709,48 @@ def main():
         help="Output format (default: latex). 'all' exports to all formats."
     )
     
+    # Paper fetcher arguments
+    parser.add_argument(
+        "--search-papers",
+        action="store_true",
+        help="Search for papers using PRISMA methodology and save candidates"
+    )
+    parser.add_argument(
+        "--search-and-download",
+        action="store_true",
+        help="Search for papers and automatically download eligible ones"
+    )
+    parser.add_argument(
+        "--download-papers",
+        action="store_true",
+        help="Download approved papers from paper_candidates.json"
+    )
+    parser.add_argument(
+        "--prisma-report",
+        action="store_true",
+        help="Generate PRISMA report from paper_candidates.json"
+    )
+    
     args = parser.parse_args()
     
-    # Parse clusters argument
+    # Handle paper fetcher commands
+    if args.search_papers:
+        search_papers_command(auto_download=False)
+        sys.exit(0)
+    
+    if args.search_and_download:
+        search_papers_command(auto_download=True)
+        sys.exit(0)
+    
+    if args.download_papers:
+        download_papers_command()
+        sys.exit(0)
+    
+    if args.prisma_report:
+        prisma_report_command()
+        sys.exit(0)
+    
+    # Parse clusters argument for main pipeline
     if args.clusters.lower() == 'auto':
         clusters = None  # Auto-detect
     else:

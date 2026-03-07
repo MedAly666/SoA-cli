@@ -282,8 +282,13 @@ After running:
 
 ```
 artifacts/
-├── initial_state.json         # Input state (for debugging)
-├── final_state.json           # Complete final state
+├── states/
+│   ├── initial_state.json     # Input state (for debugging)
+│   └── final_state.json       # Complete final state
+├── prisma/
+│   ├── prisma_report.json     # PRISMA statistics
+│   ├── prisma_flow_diagram.md # PRISMA flow diagram
+│   └── excluded_papers.json   # Exclusion log
 ├── reader/
 │   ├── paper1.json
 │   └── paper2.json
@@ -300,6 +305,10 @@ artifacts/
 │   └── synthesis.json
 └── soa/
     └── state_of_the_art.tex   # Draft LaTeX
+
+artifacts/vector_db/
+├── index.faiss                  # FAISS vector index
+└── meta.json                    # Vector DB metadata
 
 STATE_OF_THE_ART.tex             # Final output (copied to root)
 THEMATIC_CONTRACT.json           # Global theme
@@ -347,7 +356,7 @@ for chunk in app.stream(initial_state, config):
 ```python
 import json
 
-with open("artifacts/final_state.json") as f:
+with open("artifacts/states/final_state.json") as f:
     state = json.load(f)
 
 for err in state.get("errors", []):
@@ -441,7 +450,7 @@ for event in app.stream_events(initial_state, config):
 ## Support
 
 For issues or questions:
-1. Check error logs in `artifacts/final_state.json`
+1. Check error logs in `artifacts/states/final_state.json`
 2. Review individual stage outputs in `artifacts/*/`
 3. Compare with sequential script output for validation
 

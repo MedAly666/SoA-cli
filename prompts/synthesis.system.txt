@@ -64,8 +64,10 @@ SYNTHESIS METHODOLOGY:
       - Aggregate loss function choices and training strategies
       - Synthesize feature extraction and representation learning approaches
       - Compare ensemble methods and model fusion techniques
+      - Identify architectural design patterns and innovations
+      - Analyze hyperparameter settings and tuning strategies
    
-   C. **Qualitative Integration**:
+   F. **Qualitative Integration**:
       - Common challenges identified
       - Shared design principles
       - Recurring limitations

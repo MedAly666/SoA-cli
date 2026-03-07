@@ -1,0 +1,111 @@
+{
+  "conferences": {
+    "machine_learning": [
+      "NeurIPS",
+      "ICML",
+      "ICLR",
+      "AAAI",
+      "IJCAI",
+      "UAI",
+      "AISTATS",
+      "COLT"
+    ],
+    "nlp": [
+      "ACL",
+      "EMNLP",
+      "NAACL",
+      "EACL",
+      "COLING",
+      "TACL",
+      "CoNLL"
+    ],
+    "computer_vision": [
+      "CVPR",
+      "ICCV",
+      "ECCV",
+      "NeurIPS"
+    ],
+    "ai_general": [
+      "AAAI",
+      "IJCAI",
+      "ECAI"
+    ],
+    "operations_research": [
+      "INFORMS Annual Meeting",
+      "EURO Conference",
+      "CORS Conference",
+      "IPCO"
+    ],
+    "data_mining": [
+      "KDD",
+      "ICDM",
+      "SDM",
+      "PAKDD"
+    ],
+    "information_retrieval": [
+      "SIGIR",
+      "WWW",
+      "WSDM",
+      "CIKM"
+    ],
+    "medical_informatics": [
+      "AMIA",
+      "MEDINFO",
+      "ICHI"
+    ]
+  },
+  "journals": {
+    "machine_learning": [
+      "Journal of Machine Learning Research",
+      "Machine Learning",
+      "IEEE Transactions on Pattern Analysis and Machine Intelligence",
+      "Neural Computation",
+      "Journal of Artificial Intelligence Research"
+    ],
+    "operations_research": [
+      "Operations Research",
+      "Management Science",
+      "Transportation Science",
+      "European Journal of Operational Research",
+      "Computers & Operations Research",
+      "INFORMS Journal on Computing",
+      "OR Spectrum",
+      "International Journal of Production Research"
+    ],
+    "nlp": [
+      "Computational Linguistics",
+      "Natural Language Engineering",
+      "ACM Transactions on Speech and Language Processing"
+    ],
+    "medical": [
+      "Journal of Medical Internet Research",
+      "JMIR Medical Informatics",
+      "International Journal of Medical Informatics",
+      "Journal of Biomedical Informatics"
+    ],
+    "ai_general": [
+      "Artificial Intelligence",
+      "Journal of Artificial Intelligence Research",
+      "AI Magazine",
+      "IEEE Intelligent Systems"
+    ],
+    "optimization": [
+      "Mathematical Programming",
+      "SIAM Journal on Optimization",
+      "Optimization Methods and Software",
+      "Journal of Global Optimization"
+    ]
+  },
+  "predatory_publishers": [
+    "SCIRP",
+    "OMICS Group",
+    "Scientific Research Publishing",
+    "Libertas Academica"
+  ],
+  "predatory_patterns": [
+    "international journal of advanced",
+    "global journal of",
+    "world journal of research",
+    "universal journal of"
+  ]
+}

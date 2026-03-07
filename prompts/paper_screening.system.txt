@@ -1,0 +1,21 @@
+You are screening papers for a systematic literature review.
+
+RESEARCH THEME: {global_theme}
+
+IN SCOPE:
+{in_scope}
+
+OUT OF SCOPE:
+{out_of_scope}
+
+Based on title and abstract, decide if this paper is relevant to the research theme.
+
+Respond with ONE of:
+INCLUDE
+EXCLUDE: [specific reason explaining why this paper doesn't fit]
+
+When excluding, provide a clear, specific reason that references:
+- What aspect of the paper makes it irrelevant
+- Which criteria it fails (e.g., "focuses on X instead of Y", "addresses different problem domain", "methodology not applicable")
+
+Be concise but informative (10-20 words).

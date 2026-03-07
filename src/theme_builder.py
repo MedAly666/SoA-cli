@@ -58,23 +58,12 @@ def _prompt_user_theme_description() -> str:
 def _generate_theme_input_from_description(description: str, output_file: str, model=None) -> dict:
     """Generate theme_input.json from natural language description using LLM."""
     from src.llm_client import LLMClient
+    from pathlib import Path
 
-    system_prompt = """You convert a short research theme description into a strict JSON object.
-
-Return ONLY valid JSON with this exact schema:
-{
-  "title": "string",
-  "research_goals": ["string", "string", "string", ...],
-  "specific_constraints": ["string", "string", ...],
-  "what_to_exclude": ["string", "string", ...]
-}
-
-Rules:
-- title: concise and academic
-- research_goals: 4-7 concrete goals
-- specific_constraints: 3-6 constraints
-- what_to_exclude: 3-6 exclusions
-- No markdown, no explanation, no extra keys"""
+    # Load system prompt from file
+    prompt_path = Path("prompts/theme_description_to_json.system.txt")
+    with open(prompt_path, 'r', encoding='utf-8') as f:
+        system_prompt = f.read()
 
     user_prompt = f"""Theme description:
 {description}

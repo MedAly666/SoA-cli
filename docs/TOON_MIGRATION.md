@@ -52,11 +52,11 @@ with open("output.json", 'r', encoding='utf-8') as f:
 ### Pipeline Outputs
 - `artifacts/synthesis/synthesis.json` - Synthesis results
 - `artifacts/clusters/clusters.json` - Cluster assignments
-- `artifacts/initial_state.json` - Pipeline initial state
-- `artifacts/final_state.json` - Pipeline final state
+- `artifacts/states/initial_state.json` - Pipeline initial state
+- `artifacts/states/final_state.json` - Pipeline final state
 
 ### Metadata
-- `vector_db/meta.json` - FAISS vector database metadata
+- `artifacts/vector_db/meta.json` - FAISS vector database metadata
 - `THEMATIC_CONTRACT.json` - Global thematic contract
 
 ### Reports

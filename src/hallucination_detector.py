@@ -284,9 +284,9 @@ def run_hallucination_checks(soa_text, extracted_db, critic_db=None):
         import faiss
         from .vectorize import get_embedder
         
-        index = faiss.read_index("vector_db/index.faiss")
+        index = faiss.read_index("artifacts/vector_db/index.faiss")
         # Load JSON metadata
-        with open("vector_db/meta.json", "r", encoding='utf-8') as f:
+        with open("artifacts/vector_db/meta.json", "r", encoding='utf-8') as f:
             meta = json.load(f)
         embedder = get_embedder()
     except Exception as e:

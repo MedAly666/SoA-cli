@@ -910,6 +910,7 @@ def writer_node(state: SOAState) -> dict:
     print("\n[Node: Writer]")
     contract = state["thematic_contract"]
     synthesis = state["synthesis"]
+    prisma_metadata = state.get("prisma_metadata")
     
     # Check if synthesis exists
     if not synthesis:
@@ -926,6 +927,11 @@ def writer_node(state: SOAState) -> dict:
     try:
         # Prepare input
         agent_input = inject_contract(synthesis, contract)
+        
+        # Add PRISMA metadata if available
+        if prisma_metadata:
+            agent_input["prisma_methodology"] = prisma_metadata
+            print(f"  → Including PRISMA methodology ({prisma_metadata.get('total_papers', 0)} papers)")
         
         # Save input
         input_path = "artifacts/soa/_writer_input.json"

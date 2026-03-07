@@ -300,12 +300,12 @@ app = compile_graph(checkpointer=MemorySaver())
 
 ### View Current State
 ```bash
-cat artifacts/final_state.json | jq '.pipeline_stage'
+cat artifacts/states/final_state.json | jq '.pipeline_stage'
 ```
 
 ### Check Errors
 ```bash
-cat artifacts/final_state.json | jq '.errors'
+cat artifacts/states/final_state.json | jq '.errors'
 ```
 
 ### Verify Outputs

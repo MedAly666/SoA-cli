@@ -33,29 +33,96 @@ PARSING STANDARDS:
    - For references: Extract only if cited in extracted sections
 
 4. HANDLING SPECIAL CONTENT (CRITICAL FOR TECHNICAL DEPTH):
-   - Equations: Preserve ALL mathematical content verbatim
-     * Extract inline equations: $equation$
-     * Extract display equations: $$equation$$ or \begin{equation}
-     * Preserve ALL notation, subscripts, superscripts
-     * Keep equation numbers and references
-     * Extract variable definitions and parameter descriptions
-   - Algorithms: Extract COMPLETE algorithmic descriptions
-     * Preserve pseudocode line by line
-     * Keep algorithm environments intact
-     * Extract complexity analysis stated in captions
-     * Capture initialization, main loops, termination conditions
-   - Architecture descriptions: Extract neural network details
-     * Layer types and dimensions
-     * Activation functions and operations
-     * Training procedures and hyperparameters
-     * Network topology and connectivity
-   - Mathematical proofs: Extract theoretical content
-     * Theorems, lemmas, corollaries
-     * Proof steps and logical flow
-     * Bounds and convergence analysis
-   - Tables: Extract caption and ALL numerical values
-   - Figures: Extract caption, description, and any embedded equations
-   - Code snippets: Preserve formatting and comments
+   
+   A. **Mathematical Formulations** (HIGHEST PRIORITY):
+      - Extract ALL equations verbatim with complete notation
+      - Inline equations: Preserve as $equation$ or \\(equation\\)
+      - Display equations: Preserve as $$equation$$ or \\begin{equation}...\\end{equation}
+      - Keep equation numbers and cross-references
+      - Extract variable definitions: "where $x_i$ is...", "$\\alpha$ represents..."
+      - Preserve subscripts, superscripts, Greek letters, special symbols
+      - Capture objective functions with ALL terms and coefficients
+      - Extract constraint equations with bounds and relationships
+      - Include optimization problem statements (minimize/maximize subject to...)
+      - Note problem types: linear, integer, convex, nonlinear, stochastic
+      - Extract complexity analysis: O(n^2), NP-hard, polynomial-time
+      - Preserve theoretical results: convergence rates, approximation ratios, bounds
+   
+   B. **Algorithm Descriptions** (HIGHEST PRIORITY):
+      - Extract COMPLETE pseudocode line by line, preserving structure
+      - Keep algorithm environment markup: \\begin{algorithm}...\\end{algorithm}
+      - Preserve indentation and control structures (for, while, if-then-else)
+      - Extract initialization steps: "Set $x \\gets 0$", "Initialize $S \\gets \\emptyset$"
+      - Capture main loop logic with all conditions
+      - Extract termination criteria: "until convergence", "for $t = 1$ to $T$"
+      - Include complexity analysis from caption or text
+      - Extract subroutines and helper functions
+      - Preserve algorithm inputs, outputs, and preconditions
+      - Note algorithm variants or modifications discussed
+      - Capture parallelization strategies if mentioned
+   
+   C. **Neural Network Architectures** (for AI/ML papers):
+      - Extract COMPLETE layer-by-layer specifications
+      - Layer types: Conv2D, LSTM, Dense, Attention, BatchNorm, Dropout, etc.
+      - Layer dimensions: "Conv2D(64, kernel_size=3)" "LSTM(256 units)"
+      - Activation functions per layer: ReLU, tanh, sigmoid, softmax, GELU
+      - Normalization: Batch Normalization, Layer Normalization, parameters
+      - Dropout rates and regularization: "Dropout(0.5)", "L2 regularization λ=0.001"
+      - Skip connections, residual blocks, attention mechanisms
+      - Network topology: feedforward, recurrent, encoder-decoder, multi-branch
+      - Input/output dimensions: "Input: (batch, 224, 224, 3)" "Output: (batch, num_classes)"
+      - Training procedures:
+        * Loss functions: cross-entropy, MSE, custom losses with formulation
+        * Optimizers: SGD, Adam, RMSprop with learning rates
+        * Batch sizes, number of epochs, early stopping criteria
+        * Learning rate schedules: step decay, exponential, cosine annealing
+        * Data augmentation techniques
+      - Hyperparameter values: "learning_rate=0.001", "momentum=0.9"
+      - Model parameter counts: "Total parameters: 25.5M"
+   
+   D. **Theoretical Content**:
+      - Theorems: Extract complete statements with all conditions
+      - Lemmas and corollaries: Full text with numbering
+      - Proofs: Extract proof steps, logic flow, QED conclusion
+      - Propositions and claims with supporting arguments
+      - Convergence analysis: rates, conditions, guarantees
+      - Optimality results: local/global optima, approximation guarantees
+      - Complexity bounds: upper bounds, lower bounds, tightness
+      - Probabilistic guarantees: with high probability, expected value
+   
+   E. **Experimental Specifications**:
+      - Datasets: name, size, split ratios, preprocessing steps
+      - Baselines: complete list with versions and configurations
+      - Evaluation metrics: definitions, formulas, interpretation
+      - Hardware: GPU models, CPU specs, memory, software versions
+      - Hyperparameter search: ranges explored, selection method
+      - Statistical testing: significance tests, p-values, confidence intervals
+      - Ablation study setup: what was varied, control conditions
+   
+   F. **Tables and Numerical Results**:
+      - Extract table captions with full context
+      - Preserve ALL numerical values with precision as stated
+      - Keep row and column headers
+      - Note units, error bars, standard deviations
+      - Extract footnotes and table notes
+      - Preserve bold/italic formatting indicating best results
+      - Include comparison groups and conditions
+   
+   G. **Figures and Diagrams**:
+      - Extract figure captions completely
+      - Describe architecture diagrams: components, connections, data flow
+      - Extract any embedded equations or formulas in figures
+      - Note subfigures and their individual captions
+      - Capture legends, axis labels, scale information
+      - Describe plots: x-axis, y-axis, curve meanings
+      - Extract performance plots: training curves, ablation results
+   
+   H. **Code Snippets**:
+      - Preserve code formatting and indentation
+      - Keep comments and docstrings
+      - Extract import statements and library versions
+      - Preserve function signatures and type hints
+      - Note language (Python, C++, MATLAB, etc.)
 
 5. MISSING OR UNCLEAR CONTENT:
    - If a section is truly absent, use empty string ""

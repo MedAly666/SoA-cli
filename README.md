@@ -13,21 +13,32 @@ A CLI-based multi-agent system for generating academically rigorous State of the
 # 2. Activate virtual environment
 source .venv/bin/activate
 
-# 3. Define your research scope
+# 3. Configure environment
+cp .env.example .env
+# Edit .env (set LLM_PROVIDER, configure paper fetcher, etc.)
+
+# 4. Define your research scope
 python -m src.theme_builder template
 nano theme_input.json
 python -m src.theme_builder build
 
-# 4. Add your papers (PDFs)
-cp /path/to/papers/*.pdf papers/
-
-# 5. Run pipeline
+# 5. Run pipeline (auto-searches for papers if none exist!)
 python3 soa_cli.py
+
+# If papers/ is empty, system automatically:
+#   → Searches academic databases (Semantic Scholar, arXiv)
+#   → Generates paper_candidates.json for review
+#   → Prompts you to approve candidates
+# Then:
+#   → Review paper_candidates.json  
+#   → Run: python soa_cli.py --download-papers
+#   → Run: python soa_cli.py (continues with SOA generation)
 
 # Output: STATE_OF_THE_ART.tex
 ```
 
 **Key Features**:
+- ✅ **Automatic paper discovery** with PRISMA methodology
 - ✅ Fault tolerance with automatic checkpointing
 - ✅ Explicit control flow with verification gates
 - ✅ Better error handling (accumulates, doesn't crash)
@@ -71,6 +82,26 @@ SOA-CLI has been enhanced with five major improvements for reliability, flexibil
 - ⚠️ Yellow console warnings with truncation stats
 - 📊 Metadata tracking in artifacts
 
+### 6. **Automatic Paper Discovery with PRISMA Methodology**
+- ✅ Auto-triggers when `papers/` directory is empty
+- ✅ Searches Semantic Scholar + arXiv with LLM-generated queries
+- ✅ PRISMA-compliant workflow (Identification → Screening → Eligibility)
+- ✅ Quality filters: venue whitelist, citation counts, year ranges
+- ✅ Predatory publisher detection
+- ✅ Generates `paper_candidates.json` for manual review
+- ✅ Full PRISMA report with flow diagrams
+- ✅ **Final SOA document includes PRISMA methodology section automatically**
+- 📝 Configure: `PAPER_SOURCES`, `PAPER_MIN_YEAR`, `PAPER_MIN_CITATIONS` in `.env`
+- 📚 See [PAPER_FETCHER_GUIDE.md](PAPER_FETCHER_GUIDE.md) for complete documentation
+
+**PRISMA in Your Document**: When papers are fetched via the paper fetcher, the generated State of the Art document automatically includes a comprehensive methodology section documenting:
+- Search strategy (databases, queries, dates)
+- PRISMA 4-stage selection process with flow diagram
+- Quality assessment criteria
+- Data extraction procedures
+
+This makes your literature review publication-ready and compliant with systematic review standards!
+
 **Example Commands**:
 ```bash
 # Auto-detect clusters, export as Markdown, use APA citations
@@ -82,6 +113,11 @@ python soa_cli.py --format all
 
 # Manual cluster count override
 python soa_cli.py --clusters 4
+
+# Paper fetcher commands (automatic if papers/ is empty)
+python soa_cli.py --search-papers        # Manual paper search
+python soa_cli.py --download-papers      # Download approved papers
+python soa_cli.py --prisma-report        # Generate PRISMA report
 ```
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed documentation of all enhancements.
@@ -349,7 +385,8 @@ python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted
 - `artifacts/clusters/preclusters.json` - Raw similarity clusters
 - `artifacts/clusters/clusters.json` - Interpreted clusters
 - `artifacts/synthesis/synthesis.json` - Cross-paper synthesis
-- `vector_db/index.faiss` - Vector index for similarity
+- `artifacts/vector_db/index.faiss` - Vector index for similarity
+- `artifacts/vector_db/meta.json` - Vector database metadata
 
 ### Verification Reports
 
