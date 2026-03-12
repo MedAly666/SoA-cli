@@ -145,6 +145,7 @@ soa-cli/
 ├── README.md               # This file
 ├── requirements.txt        # Dependencies (includes LangGraph)
 ├── setup.sh                # Automated setup script
+├── activate.sh             # Virtual environment activation
 │
 ├── src/                    # Core implementation
 │   ├── graph/              # LangGraph architecture
@@ -152,13 +153,21 @@ soa-cli/
 │   │   ├── nodes.py        # 11 agent nodes
 │   │   └── builder.py      # Graph construction
 │   ├── theme_builder.py    # Thematic contract system
+│   ├── paper_fetcher.py    # PRISMA paper search & screening
+│   ├── pdf_parser.py       # Semantic PDF extraction
 │   ├── vectorize.py        # FAISS embeddings
 │   ├── similarity_cluster.py  # Clustering
 │   ├── hallucination_detector.py  # Verification
-│   └── repair_loop.py      # Repair system
+│   ├── repair_loop.py      # Repair system
+│   ├── llm_client.py       # Unified LLM interface
+│   ├── exporter.py         # Multi-format export
+│   └── citation_formatter.py  # Citation styles
 │
-├── prompts/                # Agent system prompts (9 files)
+├── prompts/                # Agent system prompts (12 files)
 │   ├── theme_builder.system.txt
+│   ├── theme_description_to_json.system.txt
+│   ├── query_generator.system.txt
+│   ├── paper_screening.system.txt
 │   ├── reader.system.txt
 │   ├── extractor.system.txt
 │   ├── critic.system.txt
@@ -168,46 +177,41 @@ soa-cli/
 │   ├── verifier.system.txt
 │   └── repair.system.txt
 │
-├── papers/                 # Input PDFs (add your papers here)
-├── artifacts/              # All intermediate outputs
-│   ├── reader/
-│   ├── extracted/
-│   ├── critic/
-│   ├── clusters/
-│   ├── synthesis/
-│   └── soa/
+├── config/                 # Configuration files
+│   └── venues.json         # Approved publication venues
 │
-├── docs/                   # Complete documentation
-│   ├── README.md           # Docs index
-│   ├── QUICKREF.md         # Quick reference
-│   ├── USAGE.md            # Usage guide
-│   ├── LANGGRAPH_GUIDE.md  # Architecture guide
-│   └── ...                 # Additional guides
-│
-├── test_langgraph.py       # Validation tests
-└── visualize_graph.py      # Graph visualization tool
-├── setup.sh                # Setup script
-├──── src/                    # Core modules
-│   ├── theme_builder.py    # Thematic contract (Stage 0)
-│   ├── vectorize.py        # Vector database & embeddings
-│   ├── similarity_cluster.py
-│   ├── hallucination_detector.py
-│   └── repair_loop.py
 ├── scripts/                # Utility scripts
 │   └── check.py            # Pre-flight verification
-├── docs/                   # Complete documentation
-│   ├── QUICKREF.md         # ⭐ Quick reference
-│   ├── THEMATIC_PRIMING.md # ⭐ Thematic guide
-│   ├── USAGE.md            # Detailed usage
-│   ├── SCHEMAS.md          # Data structures
-│   └── ...                 # Architecture specs
-├── prompts/                # Agent system prompts
-├── papers/                 # Your PDFs go here
-└── artifacts/              # All outputs
-    ├── extracted/
-    ├── clusters/
-    ├── synthesis/
-    └── soa/                # ⭐ Final output here
+│
+├── papers/                 # Input PDFs (add your papers here)
+│
+├── artifacts/              # All outputs (organized by stage)
+│   ├── states/             # Pipeline states
+│   │   ├── initial_state.json
+│   │   └── final_state.json
+│   ├── prisma/             # Paper search results
+│   │   ├── prisma_report.json
+│   │   ├── prisma_flow_diagram.md
+│   │   └── excluded_papers.json
+│   ├── vector_db/          # Vector database
+│   │   ├── index.faiss
+│   │   └── meta.json
+│   ├── reader/             # Parsed papers
+│   ├── extracted/          # Extracted facts
+│   ├── critic/             # Quality assessments
+│   ├── clusters/           # Clustering outputs
+│   ├── synthesis/          # Cross-paper synthesis
+│   └── soa/                # ⭐ Final outputs
+│
+└── docs/                   # Complete documentation
+    ├── README.md           # Documentation index
+    ├── QUICKREF.md         # Quick reference
+    ├── USAGE.md            # Usage guide
+    ├── LANGGRAPH_GUIDE.md  # Architecture guide
+    ├── THEMATIC_PRIMING.md # Thematic system
+    ├── PAPER_FETCHER_GUIDE.md  # Paper search
+    ├── CONFIGURATION.md    # Configuration reference
+    └── ...                 # Additional guides
 ```
 
 ---
@@ -378,6 +382,10 @@ python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted
 
 ### Intermediate Artifacts
 
+- `artifacts/states/initial_state.json` - Pipeline initial state
+- `artifacts/states/final_state.json` - Pipeline final state  
+- `artifacts/prisma/prisma_report.json` - PRISMA paper search report  
+- `artifacts/prisma/excluded_papers.json` - Papers excluded during screening
 - `artifacts/reader/*.json` - Parsed paper structures
 - `artifacts/extracted/*.json` - Extracted facts per paper
 - `artifacts/critic/*.json` - Quality assessments
@@ -579,13 +587,14 @@ Reviewers **will** spot AI-generated content that lacks grounding. This system p
 
 ## 📚 Documentation
 
-- [docs/QUICKREF.md](docs/QUICKREF.md) - Quick reference guide
-- [docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md) - Thematic system guide
-- [docs/USAGE.md](docs/USAGE.md) - Detailed usage instructions
-- [docs/SCHEMAS.md](docs/SCHEMAS.md) - Data structure reference
-- [docs/main.md](docs/main.md) - Architecture specification
-- [docs/orchestrator.md](docs/orchestrator.md) - Pipeline design
-- [docs/prompts.md](docs/prompts.md) - Agent constraints
-- [docs/vectordb.md](docs/vectordb.md) - Clustering system
-- [docs/hallucination.md](docs/hallucination.md) - Verification system
-- [docs/rewriter.md](docs/rewriter.md) - Repair system
+- **[docs/README.md](docs/README.md)** - Documentation index and overview
+- **[docs/QUICKREF.md](docs/QUICKREF.md)** - Quick reference guide
+- **[docs/USAGE.md](docs/USAGE.md)** - Detailed usage instructions
+- **[docs/LANGGRAPH_GUIDE.md](docs/LANGGRAPH_GUIDE.md)** - Architecture deep dive
+- **[docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md)** - Thematic system guide
+- **[docs/PAPER_FETCHER_GUIDE.md](docs/PAPER_FETCHER_GUIDE.md)** - Paper search and PRISMA workflow
+- **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - Environment variables and configuration
+- **[docs/SCHEMAS.md](docs/SCHEMAS.md)** - Data structure reference
+- **[docs/PROVIDER_SETUP.md](docs/PROVIDER_SETUP.md)** - LLM provider setup instructions
+- **[docs/vectordb.md](docs/vectordb.md)** - Clustering and vector database system
+- **[docs/hallucination.md](docs/hallucination.md)** - Verification and hallucination detection

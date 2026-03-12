@@ -10,27 +10,28 @@ Welcome to the SOA-CLI documentation. This system uses LangGraph for production-
 - **[Quick Reference (QUICKREF.md)](QUICKREF.md)** - Essential commands and quick start
 - **[Usage Guide (USAGE.md)](USAGE.md)** - Detailed usage instructions
 - **[Configuration (CONFIGURATION.md)](CONFIGURATION.md)** - Environment variables and settings
+- **[Provider Setup (PROVIDER_SETUP.md)](PROVIDER_SETUP.md)** - LLM provider configuration
 
-### Architecture & Implementation
+### Architecture & Design
 - **[LangGraph Architecture (LANGGRAPH_GUIDE.md)](LANGGRAPH_GUIDE.md)** - Complete architecture guide
 - **[Implementation Summary (IMPLEMENTATION_SUMMARY.md)](IMPLEMENTATION_SUMMARY.md)** - Current implementation status
-- **[Cleanup Summary (CLEANUP_SUMMARY.md)](CLEANUP_SUMMARY.md)** - Recent refactoring changes
+- **[Data Schemas (SCHEMAS.md)](SCHEMAS.md)** - JSON schema reference
 
 ### Core Systems
 - **[Thematic Priming (THEMATIC_PRIMING.md)](THEMATIC_PRIMING.md)** - Thematic contract system
 - **[Thematic Implementation (THEMATIC_IMPLEMENTATION.md)](THEMATIC_IMPLEMENTATION.md)** - Implementation details
+- **[Paper Fetcher Guide (PAPER_FETCHER_GUIDE.md)](PAPER_FETCHER_GUIDE.md)** - PRISMA-compliant paper search
 - **[Hallucination Detection (hallucination.md)](hallucination.md)** - Verification system
 - **[Vector Database (vectordb.md)](vectordb.md)** - Clustering system
-- **[Repair System (rewriter.md)](rewriter.md)** - Iterative repair
 
-### Reference
-- **[Data Schemas (SCHEMAS.md)](SCHEMAS.md)** - JSON schema reference
-- **[Provider Setup (PROVIDER_SETUP.md)](PROVIDER_SETUP.md)** - LLM provider configuration
+### Features & Enhancements
+- **[Vector DB & Clean Command (VECTOR_DB_AND_CLEAN.md)](VECTOR_DB_AND_CLEAN.md)** - Vector DB location and clean command behavior
+- **[Artifacts Guide (ARTIFACTS_GUIDE.md)](ARTIFACTS_GUIDE.md)** - Understanding generated artifacts
+- **[Semantic PDF Implementation (SEMANTIC_PDF_IMPLEMENTATION.md)](SEMANTIC_PDF_IMPLEMENTATION.md)** - PDF parsing enhancements
+- **[Multimodal PDF Solution (MULTIMODAL_PDF_SOLUTION.md)](MULTIMODAL_PDF_SOLUTION.md)** - Figure and table extraction
 
-### Legacy Documentation
-The following files contain design notes from earlier iterations but may have outdated information:
-- [main.md](main.md) - Original architecture notes
-- [prompts.md](prompts.md) - Prompt design notes
+### Migration & Technical Notes
+- **[TOON Migration (TOON_MIGRATION.md)](TOON_MIGRATION.md)** - Migration to JSON-based pipeline
 
 ---
 
