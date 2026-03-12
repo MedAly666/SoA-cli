@@ -186,7 +186,6 @@ soa-cli/
 │
 ├── test_langgraph.py       # Validation tests
 └── visualize_graph.py      # Graph visualization tool
-```
 ├── setup.sh                # Setup script
 ├──── src/                    # Core modules
 │   ├── theme_builder.py    # Thematic contract (Stage 0)

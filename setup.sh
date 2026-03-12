@@ -56,10 +56,9 @@ fi
 # Make scripts executable
 echo ""
 echo "[6/6] Making scripts executable..."
-chmod +x soa_cli.py test_langgraph.py visualize_graph.py
+chmod +x soa_cli.py
 echo "    ✓ soa_cli.py is executable"
-echo "    ✓ test_langgraph.py is executable"
-echo "    ✓ visualize_graph.py is executable"
+
 
 # Final instructions
 echo ""

@@ -33,34 +33,30 @@ wheels/
 .DS_Store
 
 # Artifacts (generated during pipeline)
+
+artifacts/*.json
 artifacts/reader/*.json
-artifacts/reader/*.toon
 artifacts/reader/_temp_*.txt
 
 artifacts/extracted/*.json
-artifacts/extracted/*.toon
 
 artifacts/extracted_filtered/*.json
-artifacts/extracted_filtered/*.toon
 
 artifacts/extracted_facts/*.json
-artifacts/extracted_facts/*.toon
 
 artifacts/critic/*.json
-artifacts/critic/*.toon
 
 artifacts/clusters/*.json
-artifacts/clusters/*.toon
 
 artifacts/synthesis/*.json
-artifacts/synthesis/*.toon
 
 artifacts/soa/*.tex
 artifacts/soa/*.json
 artifacts/soa/_repair_*.json
 artifacts/soa/_writer_*.json
-artifacts/*_state.json
-artifacts/*_state.toon
+artifacts/states/*.json
+
+
 
 # Vector database (generated)
 vector_db/
