@@ -34,7 +34,7 @@ python3 soa_cli.py
 #   → Run: python soa_cli.py --download-papers
 #   → Run: python soa_cli.py (continues with SOA generation)
 
-# Output: STATE_OF_THE_ART.tex
+# Output: state_of_the_art.tex
 ```
 
 **Key Features**:
@@ -323,7 +323,7 @@ The pipeline processes all papers with:
 - ✅ LaTeX generation
 - ✅ Verification and repair (up to 3 iterations)
 
-**Output**: `STATE_OF_THE_ART.tex` in the root directory
+**Output**: `state_of_the_art.tex` in the root directory
 
 **Advanced Options**:
 
@@ -378,7 +378,8 @@ python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted
 
 ### Primary Output
 
-- `artifacts/soa/state_of_the_art_final.tex` - Your complete, verified State of the Art
+- `state_of_the_art.tex` (root) - Your complete, verified State of the Art
+- `artifacts/soa/state_of_the_art_draft.tex` - Initial draft before verification (for debugging)
 
 ### Intermediate Artifacts
 

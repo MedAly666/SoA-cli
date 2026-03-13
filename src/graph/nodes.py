@@ -267,14 +267,15 @@ def extract_pdf_content(pdf_path: str, max_chars: int | None = None) -> tuple[st
         return text, metadata
 
 
-def call_llm(system_prompt_path: str, input_data: dict, output_path: str) -> str:
+def call_llm(system_prompt_path: str, input_data: dict, output_path: str, max_retries: int = 3) -> str:
     """
-    Call LLM using unified LLMClient.
+    Call LLM using unified LLMClient with retry logic for JSON errors.
     
     Args:
         system_prompt_path: Path to system prompt file
         input_data: Dictionary to pass as input
         output_path: Where to save the output
+        max_retries: Maximum retry attempts for JSON parsing errors
         
     Returns:
         LLM response text
@@ -303,6 +304,31 @@ def call_llm(system_prompt_path: str, input_data: dict, output_path: str) -> str
     
     # Writer and repair nodes should output LaTeX, not JSON
     is_latex_output = 'writer' in system_prompt_path or 'repair' in system_prompt_path
+
+    def _validate_latex_output(text: str) -> tuple[bool, str]:
+        """Validate generated LaTeX to catch truncation/corruption before saving."""
+        stripped = text.strip()
+
+        if stripped.startswith("```"):
+            return False, "Output contains markdown code fences instead of raw LaTeX"
+
+        if "\\documentclass" not in text:
+            return False, "Missing \\documentclass"
+
+        if "\\begin{document}" not in text:
+            return False, "Missing \\begin{document}"
+
+        if "\\end{document}" not in text:
+            return False, "Missing \\end{document} (likely truncated output)"
+
+        if "/* Lines" in text or "omitted */" in text:
+            return False, "Contains placeholder/truncation markers (e.g., /* Lines ... omitted */)"
+
+        # Basic structural sanity: begin must appear before end.
+        if text.find("\\begin{document}") > text.find("\\end{document}"):
+            return False, "Document structure is invalid (end appears before begin)"
+
+        return True, ""
     
     if is_latex_output:
         # For LaTeX output: Don't force JSON format
@@ -312,7 +338,12 @@ def call_llm(system_prompt_path: str, input_data: dict, output_path: str) -> str
 {input_json}
 ```
 
-Generate the output as specified in the system prompt. Follow all formatting instructions carefully."""
+CRITICAL: Output ONLY the complete, compilable LaTeX document itself. Do NOT output a description, summary, or explanation. Start immediately with \\documentclass and end with \\end{{document}}. The output will be saved directly as a .tex file and must be ready to compile.
+
+The document MUST be complete and self-contained. Never output placeholders such as "/* Lines ... omitted */" or partial/truncated sections.
+If you are close to output limits, reduce verbosity but ALWAYS finish with valid LaTeX and \\end{{document}}.
+
+Follow ALL formatting instructions in the system prompt exactly."""
     else:
         # For JSON output: Explicitly request JSON format
         user_prompt = f"""# Input
@@ -330,33 +361,76 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
         timeout = int(os.getenv('LLM_TIMEOUT', '300'))
         print(f"  [LLM Config] Provider: {provider}, Model: {model or 'default'}, Timeout: {timeout}s")
     
-    # Call LLM via unified client
-    client = LLMClient()
-    output_text = client.call(system_text, user_prompt)
-    
-    # Check for LLM failure
-    if output_text.startswith("__LLM_FAILURE__:"):
-        # Log failure but don't crash - return error as output
-        print(f"  ⚠️  LLM call failed: {output_text}")
-        # Save failure message to output file
-        Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write('{"error": "' + output_text.replace('"', '\\"') + '"}')
-        return output_text
-    
-    # Sanitize control characters for JSON output
-    if output_path.endswith('.json'):
-        output_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', output_text)
-        try:
-            json.loads(output_text)  # Validate
-        except json.JSONDecodeError as e:
-            print(f"  ⚠️  Invalid JSON from LLM: {e}")
-            # Return error in JSON format
-            error_json = '{"error": "Invalid JSON from LLM"}'
+    # Retry loop for JSON and LaTeX outputs
+    for attempt in range(max_retries):
+        # Call LLM via unified client
+        client = LLMClient()
+        output_text = client.call(system_text, user_prompt)
+        
+        # Check for LLM failure
+        if output_text.startswith("__LLM_FAILURE__:"):
+            # Log failure but don't crash - return error as output
+            print(f"  ⚠️  LLM call failed (attempt {attempt + 1}/{max_retries}): {output_text}")
+            if attempt < max_retries - 1:
+                print(f"  ↻ Retrying...")
+                continue  # Retry
+            # Final attempt failed
             Path(output_path).parent.mkdir(parents=True, exist_ok=True)
             with open(output_path, 'w', encoding='utf-8') as f:
-                f.write(error_json)
-            return error_json
+                f.write('{"error": "' + output_text.replace('"', '\\"') + '"}')
+            return output_text
+        
+        # Sanitize control characters for JSON output
+        if output_path.endswith('.json'):
+            output_text = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', output_text)
+            try:
+                json.loads(output_text)  # Validate
+                # Success! Break retry loop
+                print(f"  ✓ Valid JSON received")
+                break
+            except json.JSONDecodeError as e:
+                print(f"  ⚠️  Invalid JSON from LLM (attempt {attempt + 1}/{max_retries}): {e}")
+                if attempt < max_retries - 1:
+                    print(f"  ↻ Retrying with stronger instruction...")
+                    # Add stronger JSON instruction for retry
+                    user_prompt += "\n\nIMPORTANT: You MUST output valid JSON. Do not include any markdown formatting, code blocks, or explanatory text. Return ONLY the raw JSON object."
+                    continue  # Retry
+                # All retries exhausted
+                print(f"  ✗ All {max_retries} attempts failed - saving error")
+                error_json = '{"error": "Invalid JSON from LLM after ' + str(max_retries) + ' attempts"}'
+                Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+                with open(output_path, 'w', encoding='utf-8') as f:
+                    f.write(error_json)
+                return error_json
+        else:
+            # Non-JSON output (LaTeX), validate integrity to catch truncation.
+            is_valid_latex, latex_error = _validate_latex_output(output_text)
+            if is_valid_latex:
+                print("  ✓ Valid LaTeX received")
+                break
+
+            print(f"  ⚠️  Invalid LaTeX from LLM (attempt {attempt + 1}/{max_retries}): {latex_error}")
+            if attempt < max_retries - 1:
+                print("  ↻ Retrying with stricter completion instruction...")
+                user_prompt += (
+                    "\n\nIMPORTANT RETRY INSTRUCTION: Your previous output was invalid because: "
+                    f"{latex_error}. "
+                    "Return ONLY a complete LaTeX document with no placeholders, no markdown fences, "
+                    "and ensure the final line is \\end{document}."
+                )
+                continue
+
+            # All retries exhausted for LaTeX output
+            print(f"  ✗ All {max_retries} attempts produced invalid LaTeX")
+            output_text = (
+                "\\documentclass{article}\n"
+                "\\begin{document}\n"
+                "\\section*{Generation Error}\n"
+                "The LLM did not return a valid complete LaTeX document after "
+                f"{max_retries} attempts. Last error: {latex_error}\n"
+                "\\end{document}\n"
+            )
+            break
     
     # Save output
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -943,7 +1017,7 @@ def writer_node(state: SOAState) -> dict:
         output_text = call_llm(
             "prompts/writer.system.txt",
             agent_input,
-            "artifacts/soa/state_of_the_art.tex"
+            "artifacts/soa/state_of_the_art_draft.tex"  # Save draft for debugging
         )
         
         print(f"  ✓ State of the Art generated ({len(output_text)} chars)")

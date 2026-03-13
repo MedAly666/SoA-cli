@@ -419,23 +419,21 @@ def run_pipeline(
         
         exporter = SOAExporter()
         output_dir = "artifacts/soa"
-        base_name = "state_of_the_art_final"
         
         if output_format == "all":
             # Export to all formats
-            results = export_all_formats(soa_draft, output_dir, base_name)
-            # Also save LaTeX in root for backward compatibility
-            with open("STATE_OF_THE_ART.tex", 'w', encoding='utf-8') as f:
+            results = export_all_formats(soa_draft, output_dir, "state_of_the_art")
+            # Save main LaTeX output in root
+            with open("state_of_the_art.tex", 'w', encoding='utf-8') as f:
                 f.write(soa_draft)
-            print(f"✓ LaTeX (root): STATE_OF_THE_ART.tex")
+            print(f"✓ LaTeX: state_of_the_art.tex")
             
         elif output_format == "latex":
-            # LaTeX only
-            exporter.to_latex(soa_draft, f"{output_dir}/{base_name}.tex")
-            # Also save in root for backward compatibility
-            with open("STATE_OF_THE_ART.tex", 'w', encoding='utf-8') as f:
+            # LaTeX only - save directly to root and artifacts
+            with open("state_of_the_art.tex", 'w', encoding='utf-8') as f:
                 f.write(soa_draft)
-            print(f"✓ LaTeX: STATE_OF_THE_ART.tex")
+            exporter.to_latex(soa_draft, f"{output_dir}/state_of_the_art.tex")
+            print(f"✓ LaTeX: state_of_the_art.tex")
             
         elif output_format == "markdown":
             # Markdown only
