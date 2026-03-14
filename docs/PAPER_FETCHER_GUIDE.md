@@ -285,7 +285,7 @@ Documentation of how data was extracted:
 
 ### Example Output
 
-Your final `STATE_OF_THE_ART.tex` will include:
+Your final `state_of_the_art.tex` will include:
 
 ```latex
 \section{Introduction}

@@ -35,6 +35,15 @@ class SOAState(TypedDict):
     synthesis: Optional[dict]  # Cross-paper synthesis
     soa_draft: Optional[str]  # Current version of LaTeX SoA
     prisma_metadata: Optional[dict]  # PRISMA search methodology metadata (if papers auto-fetched)
+    citation_graph: Optional[dict]  # Directed graph of citation + thematic links
+
+    # ===== QUALITY SIGNALS =====
+    rubric_scores: dict[str, float]  # Multi-dimensional quality scores
+    rubric_failing: list[str]  # Dimensions scoring below threshold
+
+    reflector_feedback: dict  # Multi-level reflector diagnostics
+    reflector_passed_level: int  # 0..3, highest passed reflector level
+    reflector_rewrite_attempts: int  # Number of writer rewrites triggered by reflector
     
     # ===== VERIFICATION & REPAIR =====
     verification_results: Optional[list[dict]]  # Hallucination violations

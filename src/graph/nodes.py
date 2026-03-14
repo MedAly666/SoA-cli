@@ -25,7 +25,11 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from theme_builder import build_thematic_contract, inject_theme_into_input
 from vectorize import build_vector_db
+from vectorize import load_vector_db
 from similarity_cluster import run_similarity_clustering
+from citation_graph import build_citation_graph, get_grounding_context
+from reflector import run_reflector
+from rubric_evaluator import run_rubric_evaluator
 
 # Import semantic PDF parser
 try:
@@ -42,6 +46,40 @@ def inject_contract(data: dict, contract: dict) -> dict:
     This enforces global scope constraints.
     """
     return inject_theme_into_input(data, contract)
+
+
+def _collect_seed_paper_ids(obj: Any) -> list[str]:
+    """Recursively collect likely cluster seed paper IDs from nested structures."""
+    ids: set[str] = set()
+
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            key_lower = str(key).lower()
+            if key_lower in {
+                "paper_id",
+                "seed_paper_id",
+                "representative_paper_id",
+                "seed",
+                "representative_paper",
+            } and isinstance(value, str) and value.strip():
+                ids.add(value.strip())
+            else:
+                for nested_id in _collect_seed_paper_ids(value):
+                    ids.add(nested_id)
+
+    elif isinstance(obj, list):
+        for item in obj:
+            for nested_id in _collect_seed_paper_ids(item):
+                ids.add(nested_id)
+
+    return sorted(ids)
+
+
+def _write_json(path: str, payload: dict) -> None:
+    """Write JSON payload to disk safely."""
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(payload, f, indent=2)
 
 
 def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> tuple[str, dict]:
@@ -802,6 +840,10 @@ def vectorize_node(state: SOAState) -> dict:
         print(f"  ✓ Vectorized {len(temp_files)} papers")
         
         return {
+            "embeddings": {
+                "source": "faiss_index",
+                "count": len(temp_files)
+            },
             "pipeline_stage": "vectorize_complete",
             "errors": []
         }
@@ -811,6 +853,49 @@ def vectorize_node(state: SOAState) -> dict:
         return {
             "errors": [{
                 "node": "vectorize",
+                "error": str(e)
+            }]
+        }
+
+
+def build_graph_node(state: SOAState) -> dict:
+    """
+    Build hierarchical citation graph using extracted papers + embedding similarity.
+
+    Returns:
+        Partial state with citation_graph
+    """
+    print("\n[Node: Build Graph]")
+
+    try:
+        extracted_dir = "artifacts/extracted"
+        index = None
+        embeddings = None
+
+        try:
+            index, _ = load_vector_db()
+        except Exception as e:
+            print(f"  ⚠️  Could not load vector index: {e}")
+            print("  ↳ Building citation graph without thematic edges from embeddings")
+
+        graph = build_citation_graph(extracted_dir, index, embeddings)
+        _write_json("artifacts/clusters/citation_graph.json", graph)
+
+        print(f"  ✓ Citation graph built ({len(graph.get('nodes', []))} nodes, {len(graph.get('edges', []))} edges)")
+
+        return {
+            "citation_graph": graph,
+            "pipeline_stage": "build_graph_complete",
+            "errors": []
+        }
+
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        return {
+            "citation_graph": {"nodes": [], "edges": []},
+            "pipeline_stage": "build_graph_failed",
+            "errors": [{
+                "node": "build_graph",
                 "error": str(e)
             }]
         }
@@ -927,23 +1012,29 @@ def synthesis_node(state: SOAState) -> dict:
     contract = state["thematic_contract"]
     clusters = state["clusters"]
     extracted = state["extracted_facts"]
+    citation_graph = state.get("citation_graph") or {"nodes": [], "edges": []}
     
     try:
         # Prepare input
         relevant_papers = [p for p in extracted.values() if "error" not in p]
+
+        seed_ids = _collect_seed_paper_ids(clusters)
+        citation_graph_context = {
+            seed_id: get_grounding_context(citation_graph, seed_id, top_k=5)
+            for seed_id in seed_ids
+        }
         
         data = {
             "clusters": clusters,
-            "papers": relevant_papers
+            "papers": relevant_papers,
+            "citation_graph_context": citation_graph_context,
         }
         
         agent_input = inject_contract(data, contract)
         
         # Save input
         input_path = "artifacts/synthesis/input.json"
-        Path(input_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(input_path, 'w', encoding='utf-8') as f:
-            json.dump(agent_input, f, indent=2)
+        _write_json(input_path, agent_input)
         
         # Call LLM
         output_text = call_llm(
@@ -985,6 +1076,8 @@ def writer_node(state: SOAState) -> dict:
     contract = state["thematic_contract"]
     synthesis = state["synthesis"]
     prisma_metadata = state.get("prisma_metadata")
+    citation_graph = state.get("citation_graph") or {"nodes": [], "edges": []}
+    reflector_feedback = state.get("reflector_feedback") or {}
     
     # Check if synthesis exists
     if not synthesis:
@@ -1001,6 +1094,25 @@ def writer_node(state: SOAState) -> dict:
     try:
         # Prepare input
         agent_input = inject_contract(synthesis, contract)
+
+        # Add graph grounding summary
+        agent_input["citation_graph"] = citation_graph
+
+        # Add focused graph neighborhood context for likely seed papers.
+        writer_seed_ids = _collect_seed_paper_ids(synthesis)
+        if not writer_seed_ids:
+            writer_seed_ids = sorted(list((state.get("extracted_facts") or {}).keys()))[:5]
+
+        agent_input["citation_graph_context"] = {
+            seed_id: get_grounding_context(citation_graph, seed_id, top_k=5)
+            for seed_id in writer_seed_ids
+        }
+
+        # Add reflector correction brief when re-writing is requested
+        correction_brief = reflector_feedback.get("correction_brief")
+        if correction_brief and correction_brief.get("level") != "none":
+            agent_input["reflector_correction_brief"] = correction_brief
+            print(f"  → Applying reflector correction brief ({correction_brief.get('level')})")
         
         # Add PRISMA metadata if available
         if prisma_metadata:
@@ -1009,9 +1121,7 @@ def writer_node(state: SOAState) -> dict:
         
         # Save input
         input_path = "artifacts/soa/_writer_input.json"
-        Path(input_path).parent.mkdir(parents=True, exist_ok=True)
-        with open(input_path, 'w', encoding='utf-8') as f:
-            json.dump(agent_input, f, indent=2)
+        _write_json(input_path, agent_input)
         
         # Call LLM
         output_text = call_llm(
@@ -1019,6 +1129,11 @@ def writer_node(state: SOAState) -> dict:
             agent_input,
             "artifacts/soa/state_of_the_art_draft.tex"  # Save draft for debugging
         )
+
+        # Save canonical working file for downstream evaluator nodes.
+        Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
+        with open("artifacts/soa/state_of_the_art.tex", 'w', encoding='utf-8') as f:
+            f.write(output_text)
         
         print(f"  ✓ State of the Art generated ({len(output_text)} chars)")
         
@@ -1038,6 +1153,26 @@ def writer_node(state: SOAState) -> dict:
                 "error": str(e)
             }]
         }
+
+
+def reflector_node(state: SOAState) -> dict:
+    """
+    Hierarchical reflector (L1 outline -> L2 section -> L3 paragraph).
+
+    Returns:
+        Partial state with reflector_feedback and reflector_passed_level.
+    """
+    return run_reflector(state, llm_caller=call_llm)
+
+
+def rubric_evaluator_node(state: SOAState) -> dict:
+    """
+    Multi-dimensional rubric scoring node.
+
+    Returns:
+        Partial state with rubric_scores and rubric_failing dimensions.
+    """
+    return run_rubric_evaluator(state, llm_caller=call_llm)
 
 
 def verifier_node(state: SOAState) -> dict:
@@ -1125,6 +1260,7 @@ def repair_node(state: SOAState) -> dict:
     soa_draft = state["soa_draft"]
     extracted = state["extracted_facts"]
     iteration = state["repair_iteration"]
+    rubric_failing = state.get("rubric_failing", [])
     
     # Check if we have valid data to repair
     if not soa_draft:
@@ -1152,11 +1288,27 @@ def repair_node(state: SOAState) -> dict:
     try:
         print(f"  Repair iteration: {iteration + 1}")
         print(f"  Violations to fix: {len(violations)}")
-        
-        # In production, this would call repair functions from repair_loop
-        # For now, just increment iteration
-        
-        repaired_draft = soa_draft  # Would actually repair here
+        print(f"  Rubric failing dimensions: {', '.join(rubric_failing) if rubric_failing else 'None'}")
+
+        repair_input = {
+            "soa_draft": soa_draft,
+            "verification_results": violations,
+            "rubric_failing": rubric_failing,
+            "extracted_paper_ids": sorted(list(extracted.keys())),
+            "repair_iteration": iteration + 1,
+        }
+
+        _write_json("artifacts/soa/_repair_input.json", repair_input)
+
+        repaired_draft = call_llm(
+            "prompts/repair.system.txt",
+            repair_input,
+            "artifacts/soa/state_of_the_art_repaired.tex"
+        )
+
+        # Keep canonical path in sync for downstream tooling.
+        with open("artifacts/soa/state_of_the_art.tex", 'w', encoding='utf-8') as f:
+            f.write(repaired_draft)
         
         print(f"  ✓ Repair complete")
         

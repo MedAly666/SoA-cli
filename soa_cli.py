@@ -210,6 +210,14 @@ def create_initial_state(
         "synthesis": None,
         "soa_draft": None,
         "prisma_metadata": prisma_metadata,
+        "citation_graph": None,
+
+        # Quality signals
+        "rubric_scores": {},
+        "rubric_failing": [],
+        "reflector_feedback": {},
+        "reflector_passed_level": 0,
+        "reflector_rewrite_attempts": 0,
         
         # Verification
         "verification_results": None,
@@ -419,6 +427,7 @@ def run_pipeline(
         
         exporter = SOAExporter()
         output_dir = "artifacts/soa"
+        base_name = "state_of_the_art"
         
         if output_format == "all":
             # Export to all formats

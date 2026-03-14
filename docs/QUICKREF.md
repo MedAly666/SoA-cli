@@ -21,7 +21,7 @@ source .venv/bin/activate  # OR: source activate.sh
 ```
 
 **Architecture**: 
-- LangGraph-based pipeline with 11 nodes
+- LangGraph-based pipeline with 14 nodes
 - Automatic checkpointing (resume from any node)
 - Type-safe state management
 - Verification gates and repair loops
@@ -77,9 +77,13 @@ python3 soa_cli.py --resume --thread-id my-session
 ## Output Location
 
 ```
-STATE_OF_THE_ART.tex           # Final output (root)
+state_of_the_art.tex           # Final output (root)
 artifacts/states/final_state.json     # Complete state
-artifacts/soa/state_of_the_art.tex  # Draft LaTeX
+artifacts/soa/state_of_the_art.tex    # Canonical pipeline copy
+artifacts/soa/state_of_the_art_draft.tex  # Initial writer draft
+artifacts/soa/reflector_feedback.json # Reflector issues + correction brief
+artifacts/soa/rubric_report.json      # 7-dim quality scores
+artifacts/clusters/citation_graph.json # Citation/thematic grounding graph
 ```
 
 ---
@@ -120,10 +124,14 @@ Stage 0: Thematic Contract     ← Define scope
 Stage 1: Reader                ← Parse PDFs
 Stage 2: Extractor (filtered)  ← Extract relevant facts
 Stage 3: Critic (focused)      ← Assess quality
-Stage 4: Clustering (filtered) ← Group by similarity
-Stage 5: Synthesis (driven)    ← Address core questions
-Stage 6: Writer (bounded)      ← Generate SoA
-Stage 7: Verify & Repair       ← Fix hallucinations
+Stage 4: Vectorize             ← Build embeddings
+Stage 5: Build Graph           ← Citation/thematic grounding
+Stage 6: Clustering (filtered) ← Group by similarity
+Stage 7: Synthesis (driven)    ← Address core questions with graph context
+Stage 8: Writer (bounded)      ← Generate SoA
+Stage 9: Reflector             ← L1/L2/L3 hierarchical checks
+Stage 10: Rubric Evaluator     ← 7-dimensional scoring
+Stage 11: Verify & Repair      ← Final factual checks and targeted fixes
 ```
 
 ## What Gets Filtered?
@@ -203,7 +211,7 @@ soa-cli/
 - [ ] out_of_scope explicitly defined
 - [ ] Papers added to papers/
 - [ ] ./check.py passes
-- [ ] Run orchestrator.py
+- [ ] Run python3 soa_cli.py
 
 ## Academic Defense
 

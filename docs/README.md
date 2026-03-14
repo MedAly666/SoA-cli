@@ -27,6 +27,7 @@ Welcome to the SOA-CLI documentation. This system uses LangGraph for production-
 ### Features & Enhancements
 - **[Vector DB & Clean Command (VECTOR_DB_AND_CLEAN.md)](VECTOR_DB_AND_CLEAN.md)** - Vector DB location and clean command behavior
 - **[Artifacts Guide (ARTIFACTS_GUIDE.md)](ARTIFACTS_GUIDE.md)** - Understanding generated artifacts
+- **[Quality & Grounding Pipeline (QUALITY_AND_GROUNDING_PIPELINE.md)](QUALITY_AND_GROUNDING_PIPELINE.md)** - Reflector, rubric, and citation graph
 - **[Semantic PDF Implementation (SEMANTIC_PDF_IMPLEMENTATION.md)](SEMANTIC_PDF_IMPLEMENTATION.md)** - PDF parsing enhancements
 - **[Multimodal PDF Solution (MULTIMODAL_PDF_SOLUTION.md)](MULTIMODAL_PDF_SOLUTION.md)** - Figure and table extraction
 
@@ -55,7 +56,7 @@ cp /path/to/papers/*.pdf papers/
 # Run pipeline
 python3 soa_cli.py
 
-# Output: STATE_OF_THE_ART.tex
+# Output: state_of_the_art.tex
 ```
 
 ---
@@ -65,7 +66,7 @@ python3 soa_cli.py
 SOA-CLI uses **LangGraph** for fault-tolerant orchestration:
 
 ```
-11 Nodes → 13 Edges → Verification Gate → Repair Loop (max 3 iterations)
+14 Nodes → Reflector Gate → Rubric Gate → Verification Gate → Repair Loop
 ```
 
 **Key Features:**
@@ -82,12 +83,15 @@ SOA-CLI uses **LangGraph** for fault-tolerant orchestration:
 3. **Extractor Map** (parallel) - Extracts structured facts
 4. **Critic Map** (parallel) - Evaluates methodology
 5. **Vectorize** - Creates embeddings
-6. **Cluster** - Similarity-based grouping
-7. **Interpret Clusters** - LLM interpretation
-8. **Synthesis** - Cross-paper synthesis
-9. **Writer** - Generates LaTeX draft
-10. **Verifier** - Checks for hallucinations
-11. **Repair** (conditional, 0-3 times) - Fixes issues
+6. **Build Graph** - Citation + thematic grounding graph
+7. **Cluster** - Similarity-based grouping
+8. **Interpret Clusters** - LLM interpretation
+9. **Synthesis** - Cross-paper synthesis with graph context
+10. **Writer** - Generates LaTeX draft
+11. **Reflector** - Hierarchical checks (L1/L2/L3)
+12. **Rubric Evaluator** - 7-dimension quality scoring
+13. **Verifier** - Checks for hallucinations
+14. **Repair** (conditional, 0-3 times) - Fixes issues
 
 ---
 

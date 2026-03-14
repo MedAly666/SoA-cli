@@ -60,7 +60,7 @@ Implemented all 11 nodes:
 - ✅ Paper loading
 - ✅ Initial state creation
 - ✅ Graph invocation
-- ✅ Output saving (STATE_OF_THE_ART.tex)
+- ✅ Output saving (state_of_the_art.tex)
 - ✅ Error reporting
 - ✅ Summary statistics
 
@@ -311,7 +311,7 @@ cat artifacts/states/final_state.json | jq '.errors'
 ### Verify Outputs
 ```bash
 ls -lh artifacts/soa/state_of_the_art.tex
-cat STATE_OF_THE_ART.tex | head -50
+cat state_of_the_art.tex | head -50
 ```
 
 ### Run Validation
@@ -341,7 +341,7 @@ python3 visualize_graph.py
 ### Immediate
 1. ✅ Test with real papers: `python3 soa_cli.py`
 2. ✅ Review errors in final_state.json
-3. ✅ Validate LaTeX output: STATE_OF_THE_ART.tex
+3. ✅ Validate LaTeX output: state_of_the_art.tex
 
 ### Future Enhancements
 1. **Persistent Checkpointing**: Migrate to SQLite

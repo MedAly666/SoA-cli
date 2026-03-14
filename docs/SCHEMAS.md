@@ -338,7 +338,7 @@ PDFs
   ↓
 [Hallucination Check] → soa/hallucination_report.json
   ↓
-[Repair Loop] → soa/state_of_the_art_final.tex
+[Repair Loop] → soa/state_of_the_art_repaired.tex (if needed) + state_of_the_art.tex
 ```
 
 ## Key Principles

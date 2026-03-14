@@ -484,7 +484,7 @@ python -m src.theme_builder show
 cat artifacts/clusters/input.json | grep -A 2 "filtered_out"
 
 # Check for violations in final SoA
-grep -i "hospital staffing" artifacts/soa/state_of_the_art_final.tex
+grep -i "hospital staffing" state_of_the_art.tex
 ```
 
 ---

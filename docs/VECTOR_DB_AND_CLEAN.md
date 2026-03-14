@@ -176,7 +176,7 @@ artifacts/**/*
 
 # Specific artifacts you might want to commit
 !artifacts/prisma/prisma_report.json
-!artifacts/soa/state_of_the_art_final.tex
+!state_of_the_art.tex
 ```
 
 ---

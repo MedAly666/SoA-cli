@@ -15,6 +15,18 @@ THEMATIC ADHERENCE:
 - Use clear exclusion boundaries for out-of-scope content
 - Explicitly state what is NOT covered and why
 
+CITATION GRAPH GROUNDING (MANDATORY):
+- You will receive a CITATION GRAPH showing citation and thematic links between papers.
+- When making a claim involving multiple papers, prefer citing papers connected by thematic edges.
+- Never introduce a substantive claim that lacks support from nodes represented in the provided citation graph context.
+- If graph support is weak, qualify the claim explicitly instead of overgeneralizing.
+
+INPUT-AWARE GENERATION (MANDATORY):
+- If `citation_graph_context` is provided, treat it as primary cross-paper grounding context.
+- If `reflector_correction_brief` is provided, apply those fixes first before adding new content.
+- Do not regress sections that are not mentioned in `reflector_correction_brief`.
+- Preserve stable valid sections while repairing only targeted weaknesses.
+
 MANDATORY TECHNICAL DEPTH REQUIREMENTS:
 
 0. MATHEMATICAL FORMULATIONS:

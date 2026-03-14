@@ -32,8 +32,11 @@ python3 soa_cli.py
 This will:
 - Process all PDFs with LangGraph orchestration
 - Generate State of the Art with automatic checkpointing
+- Build citation/thematic grounding graph
+- Run hierarchical reflector checks (L1/L2/L3)
+- Score quality rubric and track failing dimensions
 - Detect and fix hallucinations (up to 3 repair iterations)
-- Output: `STATE_OF_THE_ART.tex`
+- Output: `state_of_the_art.tex`
 
 **Time**: 10-15 minutes for 10 papers (scales with paper count)
 
@@ -82,7 +85,7 @@ cp papers/P01.pdf papers/P02.pdf papers/P03.pdf papers_test/
 # 2. Run with custom directory
 python3 soa_cli.py --papers papers_test
 
-# Output will be in STATE_OF_THE_ART.tex
+# Output will be in state_of_the_art.tex
 ```
 
 ---
@@ -164,29 +167,16 @@ cp /path/to/pdfs/*.pdf papers/
 
 ## Configuration
 
-### Adjust Number of Clusters
+Use environment variables in `.env` instead of editing orchestration code directly.
 
-Edit `orchestrator.py`, line ~210:
+Examples:
 
-```python
-cluster_file = run_clustering(extracted, critics, n_clusters=8)  # Change 6 to 8
-```
-
-### Change Model or Temperature
-
-Edit `orchestrator.py`, lines 20-21:
-
-```python
-MODEL = "qwen3.5-32b"           # Change model
-TEMPERATURE = 0.2               # Lower = more conservative
-```
-
-### Adjust Parallelism
-
-Edit `orchestrator.py`, line 22:
-
-```python
-MAX_WORKERS = 6  # Increase/decrease based on your machine
+```bash
+LLM_PROVIDER=qwen
+LLM_MODEL=qwen-oauth
+LLM_TIMEOUT=800
+MAX_WORKERS=10
+CLUSTER_COUNT=auto
 ```
 
 ---
@@ -195,9 +185,14 @@ MAX_WORKERS = 6  # Increase/decrease based on your machine
 
 ### Primary Output
 
-- **artifacts/soa/state_of_the_art_final.tex**
-  - Your verified, repaired State of the Art
-  - Ready to include in your thesis
+- **state_of_the_art.tex**
+   - Main verified output in workspace root
+
+- **artifacts/soa/state_of_the_art.tex**
+   - Canonical pipeline copy used by evaluator nodes
+
+- **artifacts/soa/state_of_the_art_draft.tex**
+   - Initial writer output before downstream gates
 
 ### Intermediate Artifacts (For Review)
 
@@ -205,6 +200,12 @@ MAX_WORKERS = 6  # Increase/decrease based on your machine
 - **artifacts/critic/PX.json** - Quality assessment
 - **artifacts/clusters/clusters.json** - Paper groupings
 - **artifacts/synthesis/synthesis.json** - Cross-paper insights
+
+### Quality and Grounding Reports
+
+- **artifacts/clusters/citation_graph.json** - Citation/thematic graph
+- **artifacts/soa/reflector_feedback.json** - L1/L2/L3 findings and correction brief
+- **artifacts/soa/rubric_report.json** - 7-dimension quality scores and failing dimensions
 
 ### Reports
 
@@ -218,14 +219,14 @@ MAX_WORKERS = 6  # Increase/decrease based on your machine
 ### LaTeX
 
 ```latex
-\input{artifacts/soa/state_of_the_art_final.tex}
+\input{state_of_the_art.tex}
 ```
 
 ### Word
 
 1. Compile LaTeX to PDF
 2. Copy text from PDF
-3. Or use pandoc: `pandoc state_of_the_art_final.tex -o soa.docx`
+3. Or use pandoc: `pandoc state_of_the_art.tex -o soa.docx`
 
 ---
 

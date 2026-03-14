@@ -51,6 +51,17 @@ python3 soa_cli.py
 
 SOA-CLI has been enhanced with five major improvements for reliability, flexibility, and user experience:
 
+### 0. **Quality & Grounding Pipeline Upgrade (NEW)**
+- ✅ Added **Citation Graph** node (`build_graph`) after vectorization
+- ✅ Added **Hierarchical Reflector** node (`L1 -> L2 -> L3`) before verification
+- ✅ Added **Rubric Evaluator** node (7-dimension ARISE-style scoring)
+- ✅ Reflector can route back to writer (max 2 rewrite attempts)
+- ✅ Repair now focuses on rubric-failing dimensions only
+- ✅ New artifacts:
+    - `artifacts/clusters/citation_graph.json`
+    - `artifacts/soa/reflector_feedback.json`
+    - `artifacts/soa/rubric_report.json`
+
 ### 1. **Unified CLI-Based LLM Client with Retry Logic**
 - ✅ Routes to CLI binaries (claude, gemini, qwen, gpt, glm)
 - ✅ Exponential backoff retry (3 attempts: 2s, 4s, 8s delays)
@@ -132,6 +143,7 @@ For detailed documentation, see the [docs/](docs/) directory:
 - **[docs/QUICKREF.md](docs/QUICKREF.md)** - Quick reference card
 - **[docs/USAGE.md](docs/USAGE.md)** - Complete usage guide
 - **[docs/LANGGRAPH_GUIDE.md](docs/LANGGRAPH_GUIDE.md)** - Architecture deep dive
+- **[docs/QUALITY_AND_GROUNDING_PIPELINE.md](docs/QUALITY_AND_GROUNDING_PIPELINE.md)** - Reflector, rubric, and citation graph
 - **[docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md)** - Thematic contract system
 - **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - Environment variables
 
@@ -150,20 +162,23 @@ soa-cli/
 ├── src/                    # Core implementation
 │   ├── graph/              # LangGraph architecture
 │   │   ├── state.py        # SOAState TypedDict
-│   │   ├── nodes.py        # 11 agent nodes
+│   │   ├── nodes.py        # 14 pipeline nodes
 │   │   └── builder.py      # Graph construction
 │   ├── theme_builder.py    # Thematic contract system
 │   ├── paper_fetcher.py    # PRISMA paper search & screening
 │   ├── pdf_parser.py       # Semantic PDF extraction
 │   ├── vectorize.py        # FAISS embeddings
 │   ├── similarity_cluster.py  # Clustering
+│   ├── citation_graph.py   # Citation + thematic graph builder
+│   ├── reflector.py        # Hierarchical quality reflector (L1/L2/L3)
+│   ├── rubric_evaluator.py # 7-dimension quality rubric scorer
 │   ├── hallucination_detector.py  # Verification
 │   ├── repair_loop.py      # Repair system
 │   ├── llm_client.py       # Unified LLM interface
 │   ├── exporter.py         # Multi-format export
 │   └── citation_formatter.py  # Citation styles
 │
-├── prompts/                # Agent system prompts (12 files)
+├── prompts/                # Agent system prompts (16 files)
 │   ├── theme_builder.system.txt
 │   ├── theme_description_to_json.system.txt
 │   ├── query_generator.system.txt
@@ -174,6 +189,10 @@ soa-cli/
 │   ├── cluster.system.txt
 │   ├── synthesis.system.txt
 │   ├── writer.system.txt
+│   ├── reflector_L1.system.txt
+│   ├── reflector_L2.system.txt
+│   ├── reflector_L3.system.txt
+│   ├── rubric_evaluator.system.txt
 │   ├── verifier.system.txt
 │   └── repair.system.txt
 │
@@ -221,7 +240,7 @@ soa-cli/
 SOA-CLI uses **LangGraph** for production-grade orchestration:
 
 ```
-11 Nodes → 13 Edges → Verification Gate → Repair Loop (max 3 iterations)
+14 Nodes → Reflector Gate → Rubric Gate → Verification Gate → Repair Loop
 ```
 
 **Pipeline:**
@@ -230,17 +249,22 @@ SOA-CLI uses **LangGraph** for production-grade orchestration:
 3. **Extractor Map** (parallel) - Fact extraction
 4. **Critic Map** (parallel) - Methodology evaluation
 5. **Vectorize** - FAISS embeddings
-6. **Cluster** - Similarity grouping
-7. **Interpret Clusters** - Thematic analysis
-8. **Synthesis** - Cross-paper reasoning
-9. **Writer** - LaTeX generation
-10. **Verifier** - Hallucination detection
-11. **Repair** (conditional) - Iterative fixes
+6. **Build Graph** - Citation + thematic graph grounding
+7. **Cluster** - Similarity grouping
+8. **Interpret Clusters** - Thematic analysis
+9. **Synthesis** - Cross-paper reasoning with graph context
+10. **Writer** - LaTeX generation
+11. **Reflector** - Hierarchical quality checks (outline/section/paragraph)
+12. **Rubric Evaluator** - 7-dimension scoring and failing dimensions
+13. **Verifier** - Hallucination detection
+14. **Repair** (conditional) - Iterative targeted fixes
 
 **Key Features:**
 - ✅ Automatic checkpointing (resume from any node)
-- ✅ Type-safe state (TypedDict with 18 fields)
+- ✅ Type-safe state (extended TypedDict with quality/grounding fields)
 - ✅ Verification gates with conditional routing
+- ✅ Reflector rewrite gate (max 2 rewrites)
+- ✅ Rubric-driven targeted repair
 - ✅ Repair loop with max iteration guard
 - ✅ Parallel processing (Reader, Extractor, Critic)
 - ✅ Error accumulation (doesn't crash)
@@ -400,6 +424,9 @@ python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted
 
 - `artifacts/soa/hallucination_report.json` - Detected violations
 - `artifacts/soa/repair_failure.json` - Unrepairable issues (if any)
+- `artifacts/soa/reflector_feedback.json` - L1/L2/L3 reflector findings and correction brief
+- `artifacts/soa/rubric_report.json` - ARISE-style quality scores and failing dimensions
+- `artifacts/clusters/citation_graph.json` - Citation/thematic grounding graph
 
 ## ⚙️ Configuration
 

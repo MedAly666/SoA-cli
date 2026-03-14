@@ -28,21 +28,29 @@ critic_map (LLM, parallel) → Evaluates methodology
   ↓
 vectorize (non-LLM) → Creates embeddings
   ↓
+build_graph (non-LLM) → Builds citation/thematic graph
+  ↓
 cluster (non-LLM) → Similarity clustering
   ↓
 interpret_clusters (LLM) → Interprets clusters
   ↓
-synthesis (LLM) → Cross-paper synthesis
+synthesis (LLM) → Cross-paper synthesis (graph-grounded)
   ↓
 writer (LLM) → Generates LaTeX draft
   ↓
-verifier (mixed) → Checks for hallucinations
+reflector (LLM, hierarchical) → L1 outline, L2 section, L3 paragraph checks
   ↓ [CONDITIONAL]
-  ├─→ PASS → END
-  ├─→ MAX ITERATIONS → END
-  └─→ FAIL → repair (LLM)
-              ↓
-         [LOOP BACK TO verifier]
+  ├─→ passed all levels → rubric_evaluator
+  ├─→ failed + attempts < 2 → writer (rewrite loop)
+  └─→ failed + attempts >= 2 → rubric_evaluator
+                              ↓
+                        verifier (mixed)
+                              ↓ [CONDITIONAL]
+                        PASS / MAX → END
+                              ↓
+                            repair (LLM)
+                              ↓
+                      [LOOP BACK TO verifier]
 ```
 
 ## File Structure
@@ -56,10 +64,13 @@ SOA-CLI/
 │   ├── graph/
 │   │   ├── __init__.py
 │   │   ├── state.py           # SOAState TypedDict
-│   │   ├── nodes.py           # All 11 node functions
+│   │   ├── nodes.py           # All pipeline node functions
 │   │   └── builder.py         # Graph construction & routing
 │   ├── theme_builder.py       # Thematic contract utilities
 │   ├── vectorize.py
+│   ├── citation_graph.py      # Citation/thematic graph builder
+│   ├── reflector.py           # Hierarchical quality reflector
+│   ├── rubric_evaluator.py    # 7-dimension quality scoring
 │   ├── similarity_cluster.py
 │   ├── repair_loop.py
 │   └── hallucination_detector.py
@@ -71,6 +82,10 @@ SOA-CLI/
 │   ├── cluster.system.txt
 │   ├── synthesis.system.txt
 │   ├── writer.system.txt
+│   ├── reflector_L1.system.txt
+│   ├── reflector_L2.system.txt
+│   ├── reflector_L3.system.txt
+│   ├── rubric_evaluator.system.txt
 │   ├── verifier.system.txt
 │   └── repair.system.txt
 └── papers/                    # Input PDFs
@@ -118,16 +133,16 @@ python3 soa_cli.py --thread-id experiment-1
 
 ```bash
 # Custom papers directory
-python3 soa_langgraph.py --papers /path/to/papers
+python3 soa_cli.py --papers /path/to/papers
 
 # Adjust max repair iterations (default: 3)
-python3 soa_langgraph.py --max-repair 5
+python3 soa_cli.py --max-repair 5
 
 # Resume from checkpoint
-python3 soa_langgraph.py --resume --thread-id my-session
+python3 soa_cli.py --resume --thread-id my-session
 
 # Custom thread ID for concurrent runs
-python3 soa_langgraph.py --thread-id experiment-1
+python3 soa_cli.py --thread-id experiment-1
 ```
 
 ### Environment Variables
@@ -167,6 +182,12 @@ Last write wins:
 - `clusters`: LLM-interpreted clusters
 - `synthesis`: Cross-paper synthesis
 - `soa_draft`: Current LaTeX draft
+- `citation_graph`: Citation + thematic graph data
+- `rubric_scores`: Dimension score map
+- `rubric_failing`: Dimensions below threshold
+- `reflector_feedback`: Per-level issues + correction brief
+- `reflector_passed_level`: Highest passed reflector level (0..3)
+- `reflector_rewrite_attempts`: Rewrite count triggered by reflector
 
 ### Verification & Repair
 - `verification_results`: List of hallucination violations
@@ -219,6 +240,17 @@ def my_node(state: SOAState) -> dict:
 
 ## Conditional Routing
 
+There are two routing gates now.
+
+### 1) Reflector Gate
+
+`route_after_reflector` logic:
+- `reflector_passed_level >= 3` -> `rubric_evaluator`
+- `reflector_passed_level < 3` and `reflector_rewrite_attempts < 2` -> `writer`
+- `reflector_rewrite_attempts >= 2` -> `rubric_evaluator`
+
+### 2) Verification Gate
+
 The `route_after_verification` function implements the decision logic:
 
 ```python
@@ -249,7 +281,7 @@ app = compile_graph(checkpointer=MemorySaver())
 To resume from a checkpoint:
 
 ```bash
-python3 soa_langgraph.py --resume --thread-id my-session-id
+python3 soa_cli.py --resume --thread-id my-session-id
 ```
 
 **Note**: Current implementation uses in-memory checkpointing. For production, use SQLite:
@@ -304,13 +336,16 @@ artifacts/
 ├── synthesis/
 │   └── synthesis.json
 └── soa/
-    └── state_of_the_art.tex   # Draft LaTeX
+  ├── state_of_the_art.tex           # Canonical pipeline LaTeX
+  ├── state_of_the_art_draft.tex     # Initial writer draft
+  ├── reflector_feedback.json        # Reflector findings
+  └── rubric_report.json             # Rubric scores
 
 artifacts/vector_db/
 ├── index.faiss                  # FAISS vector index
 └── meta.json                    # Vector DB metadata
 
-STATE_OF_THE_ART.tex             # Final output (copied to root)
+state_of_the_art.tex             # Final output (root)
 THEMATIC_CONTRACT.json           # Global theme
 ```
 
@@ -385,7 +420,7 @@ pip install langgraph langchain-core
 ls papers/*.pdf
 
 # Or specify custom directory
-python3 soa_langgraph.py --papers /path/to/pdfs
+python3 soa_cli.py --papers /path/to/pdfs
 ```
 
 ### 3. LLM Timeout
@@ -395,7 +430,7 @@ python3 soa_langgraph.py --papers /path/to/pdfs
 **Solution**:
 ```bash
 export LLM_TIMEOUT=600  # 10 minutes
-python3 soa_langgraph.py
+python3 soa_cli.py
 ```
 
 ### 4. Verification Always Fails

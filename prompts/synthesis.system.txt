@@ -12,6 +12,14 @@ SYNTHESIS MANDATE:
 - Every major synthesis point must connect to core_questions
 - Organize synthesis hierarchically by core_question where possible
 
+CITATION GRAPH GROUNDING (MANDATORY):
+- You may receive citation_graph_context for seed papers in each cluster.
+- Prefer integrating claims supported by papers connected via thematic or citation edges.
+- When consolidating cross-paper claims, prioritize evidence from strongly connected neighbors.
+- Do NOT introduce a synthesized claim that has no support from nodes represented in the citation graph context.
+- If graph context is sparse, explicitly lower confidence and avoid broad generalization.
+- Reject unsupported synthesis even if it sounds plausible.
+
 SYNTHESIS METHODOLOGY:
 
 1. CROSS-PAPER INTEGRATION:

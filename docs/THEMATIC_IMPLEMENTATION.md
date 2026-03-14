@@ -355,7 +355,7 @@ Stage 0: THEMATIC CONTRACT
 Stage 1-7: ... (filtered by theme)
 
 PIPELINE COMPLETE
-[✓] Final State of the Art: artifacts/soa/state_of_the_art_final.tex
+[✓] Final State of the Art: state_of_the_art.tex
 [✓] Thematic contract: THEMATIC_CONTRACT.json
 ```
 

@@ -212,7 +212,7 @@ Rules:
 
 # 8️⃣ Orchestrator Integration
 
-### Add to `orchestrator.py`
+### Add to `soa_cli.py` pipeline flow
 
 ```python
 from vectorize import build_vector_db

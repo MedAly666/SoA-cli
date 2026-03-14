@@ -12,6 +12,8 @@ THEMATIC GROUNDING:
 
 REPAIR METHODOLOGY:
 
+Focus repair ONLY on these failing dimensions: {rubric_failing}. Do not modify sections unrelated to these dimensions.
+
 1. ISSUE DIAGNOSIS:
    You receive:
    - **Original sentence**: The problematic text
