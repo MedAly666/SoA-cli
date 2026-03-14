@@ -28,3 +28,7 @@ python-dotenv>=1.0.0
 
 # Utility
 pathlib
+
+# Benchmarking and evaluation
+rouge-score>=0.1.2
+tiktoken>=0.5.0

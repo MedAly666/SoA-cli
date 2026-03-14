@@ -56,6 +56,9 @@ artifacts/soa/_repair_*.json
 artifacts/soa/_writer_*.json
 artifacts/states/*.json
 
+artifacts/benchmark/*.json
+artifacts/benchmark/prompts/*.txt
+
 
 
 # Vector database (generated)
