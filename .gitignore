@@ -52,6 +52,8 @@ artifacts/synthesis/*.json
 
 artifacts/soa/*.tex
 artifacts/soa/*.json
+artifacts/soa/*.md
+artifacts/soa/figures/*
 artifacts/soa/_repair_*.json
 artifacts/soa/_writer_*.json
 artifacts/states/*.json
@@ -70,6 +72,7 @@ theme_input.json
 THEMATIC_CONTRACT.json
 
 # Papers (add your own, don't commit)
+papers-*/
 papers/*.pdf
 
 # Environment variables (contains sensitive configuration)

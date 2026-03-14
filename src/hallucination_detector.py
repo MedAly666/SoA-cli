@@ -15,6 +15,33 @@ import numpy as np
 from pathlib import Path
 
 
+def resolve_tex_path() -> Path:
+    """Resolve SoA LaTeX path with fallback and explicit failure."""
+    tex_path = Path("artifacts/soa/state_of_the_art_final.tex")
+    if not tex_path.exists():
+        tex_path = Path("artifacts/soa/state_of_the_art.tex")
+    if not tex_path.exists():
+        # Last-resort fallback when writer output is markdown and conversion failed.
+        md_path = Path("artifacts/soa/state_of_the_art.md")
+        if md_path.exists():
+            return md_path
+        raise FileNotFoundError(
+            "No LaTeX output found at artifacts/soa/. "
+            "The writer node may have failed. Check state['errors']."
+        )
+    return tex_path
+
+
+def count_cited_claims(tex_content: str) -> tuple[int, list[str]]:
+    """Count checkable claims containing markdown or LaTeX-style citations."""
+    sentences = re.split(r'(?<=[.!?])\s+', tex_content)
+    cited_sentences = [
+        s for s in sentences
+        if (r'\cite{' in s) or bool(re.search(r'\[@[^\]]+\]', s)) or bool(re.search(r'(?<!\w)@[A-Za-z0-9_:\-.]+', s))
+    ]
+    return len(cited_sentences), cited_sentences
+
+
 def split_into_claims(latex_text):
     """Split LaTeX text into atomic claims (sentences)."""
     # Remove LaTeX commands for cleaner processing
@@ -296,6 +323,9 @@ def run_hallucination_checks(soa_text, extracted_db, critic_db=None):
     # Split text into claims
     claims = split_into_claims(soa_text)
     print(f"[+] Extracted {len(claims)} claims from SoA")
+
+    cited_claim_count, cited_sentences = count_cited_claims(soa_text)
+    print(f"[+] Cited claim candidates: {cited_claim_count}")
     
     all_violations = []
     
@@ -338,6 +368,7 @@ def run_hallucination_checks(soa_text, extracted_db, critic_db=None):
     report = {
         "severity": "high" if len(all_violations) > 5 else "medium" if len(all_violations) > 0 else "low",
         "total_claims": len(claims),
+        "total_claims_checked": cited_claim_count,
         "violations": {
             "ungrounded": len([v for v in all_violations if v.get("detector") == "claim_evidence_grounding"]),
             "bad_citations": len([v for v in all_violations if v.get("detector") == "citation_verification"]),
@@ -345,6 +376,8 @@ def run_hallucination_checks(soa_text, extracted_db, critic_db=None):
             "contradictions": len([v for v in all_violations if v.get("detector") == "contradiction_check"])
         },
         "total_violations": len(all_violations),
+        "hallucination_rate": (len(all_violations) / cited_claim_count) if cited_claim_count > 0 else 0.0,
+        "repair_triggered": len(all_violations) > 0,
         "details": all_violations
     }
     
@@ -370,8 +403,12 @@ if __name__ == "__main__":
         print("Usage: python hallucination_detector.py <soa_file> <extracted_folder>")
         sys.exit(1)
     
-    # Load SoA text
-    with open(sys.argv[1], 'r', encoding='utf-8') as f:
+    # Load SoA text (with graceful fallback when path argument is invalid)
+    soa_path = Path(sys.argv[1]) if len(sys.argv) > 1 else resolve_tex_path()
+    if not soa_path.exists():
+        soa_path = resolve_tex_path()
+
+    with open(soa_path, 'r', encoding='utf-8') as f:
         soa_text = f.read()
     
     # Load extracted papers
@@ -387,6 +424,7 @@ if __name__ == "__main__":
     report = run_hallucination_checks(soa_text, extracted_db)
     
     # Save report
+    Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
     with open("artifacts/soa/hallucination_report.json", 'w', encoding='utf-8') as f:
         json.dump(report, f, indent=2)
     

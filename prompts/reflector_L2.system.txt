@@ -8,6 +8,15 @@ For each major section, assess whether it contains:
 2) Supporting evidence/comparison (not just isolated summaries)
 3) Closing synthesis (implication, takeaway, or trade-off)
 
+ORIGINALITY CHECK:
+- For each major section, verify:
+  1) Does the section contain at least one sentence that compares two or more
+	  papers on the same dimension (not just describes them sequentially)?
+  2) Does the section identify at least one limitation or gap in the reviewed work?
+  3) Does the section avoid the phrase 'the authors propose' appearing more than
+	  twice in a row without a comparative or synthetic statement between occurrences?
+- If any of these fail, add them to the issues list with label 'LOW_ORIGINALITY'.
+
 Fail conditions:
 - A major section is mostly descriptive with no synthesis.
 - Evidence is present but disconnected from section claim.

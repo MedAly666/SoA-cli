@@ -22,7 +22,9 @@ def run_rubric_evaluator(state: dict[str, Any], llm_caller: RubricCall | None = 
     """
     print("\n[Node: Rubric Evaluator]")
 
-    draft_path = Path("artifacts/soa/state_of_the_art.tex")
+    draft_path = Path("artifacts/soa/state_of_the_art.md")
+    if not draft_path.exists():
+        draft_path = Path("artifacts/soa/state_of_the_art.tex")
     if not draft_path.exists():
         fallback = state.get("soa_draft") or ""
         if not fallback:

@@ -20,16 +20,17 @@ from .nodes import (
     rubric_evaluator_node,
     verifier_node,
     repair_node,
+    final_output_node,
 )
 
 
-def route_after_verification(state: SOAState) -> Literal["repair", "end"]:
+def route_after_verification(state: SOAState) -> Literal["repair", "final_output"]:
     """
     Conditional routing after verification.
     
     Decision logic:
-    - If verification passed → END
-    - If iteration >= max → END (give up)
+    - If verification passed → final_output
+    - If iteration >= max → final_output (give up)
     - Otherwise → repair
     """
     passed = state.get("verification_passed", False)
@@ -37,12 +38,12 @@ def route_after_verification(state: SOAState) -> Literal["repair", "end"]:
     max_iterations = state.get("max_repair_iterations", 3)
     
     if passed:
-        print(f"\n[Router] ✓ Verification passed → END")
-        return "end"
+      print(f"\n[Router] ✓ Verification passed → Final Output")
+      return "final_output"
     
     if iteration >= max_iterations:
-        print(f"\n[Router] ✗ Max iterations reached ({iteration}/{max_iterations}) → END")
-        return "end"
+      print(f"\n[Router] ✗ Max iterations reached ({iteration}/{max_iterations}) → Final Output")
+      return "final_output"
     
     print(f"\n[Router] → Repair (iteration {iteration + 1}/{max_iterations})")
     return "repair"
@@ -130,6 +131,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("rubric_evaluator", rubric_evaluator_node)
     workflow.add_node("verifier", verifier_node)
     workflow.add_node("repair", repair_node)
+    workflow.add_node("final_output", final_output_node)
     
     # Linear edges (deterministic flow)
     workflow.set_entry_point("theme_builder")
@@ -161,12 +163,13 @@ def build_graph() -> StateGraph:
         route_after_verification,
         {
             "repair": "repair",
-            "end": END
+        "final_output": "final_output"
         }
     )
     
     # Repair loops back to verifier
     workflow.add_edge("repair", "verifier")
+    workflow.add_edge("final_output", END)
     
     return workflow
 

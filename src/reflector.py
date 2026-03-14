@@ -37,7 +37,9 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
 
     draft = state.get("soa_draft")
     if not draft:
-        draft_path = Path("artifacts/soa/state_of_the_art.tex")
+        draft_path = Path("artifacts/soa/state_of_the_art.md")
+        if not draft_path.exists():
+            draft_path = Path("artifacts/soa/state_of_the_art.tex")
         if draft_path.exists():
             draft = draft_path.read_text(encoding="utf-8", errors="ignore")
 

@@ -139,6 +139,7 @@ TRI_DIMS = [
 
 BENCHMARK_DIR = ROOT / "artifacts" / "benchmark"
 PROMPT_DIR = BENCHMARK_DIR / "prompts"
+_HSR_EMBED_MODEL: Any | None = None
 
 
 def warn(msg: str) -> None:
@@ -185,11 +186,11 @@ def run_pipeline_subprocess(command: list[str]) -> dict[str, Any]:
 def get_final_tex_path() -> Optional[Path]:
     # First try canonical high-priority paths in deterministic order.
     direct_candidates = [
+        ROOT / "artifacts" / "soa" / "state_of_the_art_final.tex",
+        ROOT / "artifacts" / "soa" / "state_of_the_art.tex",
         ROOT / "state_of_the_art.tex",
         ROOT / "artifacts" / "state_of_the_art.tex",
         ROOT / "artifacts" / "state_of_the_art_final.tex",
-        ROOT / "artifacts" / "soa" / "state_of_the_art_final.tex",
-        ROOT / "artifacts" / "soa" / "state_of_the_art.tex",
     ]
     for p in direct_candidates:
         if p.exists() and p.is_file():
@@ -408,12 +409,61 @@ def metric_sam(final_tex: str) -> tuple[Optional[float], Optional[float], Option
 
 def extract_citation_keys(tex_text: str) -> set[str]:
     keys: set[str] = set()
-    for match in re.findall(r"\\\\citep?\{([^}]*)\}", tex_text):
+    # LaTeX citations: \cite{..}, \citep{..}, \citet{..}, etc.
+    for match in re.findall(r"\\cite[a-zA-Z]*\{([^}]*)\}", tex_text):
         for k in match.split(","):
             kk = k.strip()
             if kk:
                 keys.add(kk)
+
+    # Pandoc markdown citations: [@id; @id2]
+    for match in re.findall(r"\[@([^\]]+)\]", tex_text):
+        for k in re.split(r";|,", match):
+            kk = k.strip().lstrip("@")
+            if kk:
+                keys.add(kk)
+
+    # Inline markdown citations: @id
+    for k in re.findall(r"(?<!\w)@([A-Za-z0-9_:\-.]+)", tex_text):
+        kk = k.strip()
+        if kk:
+            keys.add(kk)
+
+    # Avoid counting cross-reference labels as bibliography citations.
+    keys = {k for k in keys if not k.startswith(("fig:", "tbl:", "tab:", "eq:", "sec:"))}
     return keys
+
+
+def normalize_key(key: str) -> str:
+    """Normalize IDs for robust matching between citations and extracted filenames."""
+    return re.sub(r"[^A-Za-z0-9]+", "", key).lower()
+
+
+def resolve_valid_keys(extracted_dir: Path) -> set[str]:
+    valid: set[str] = set()
+    if not extracted_dir.exists():
+        return valid
+    for p in extracted_dir.glob("*.json"):
+        valid.add(p.stem)
+    return valid
+
+
+def _align_citations_to_valid(cited_keys: set[str], valid_keys: set[str]) -> set[str]:
+    if not cited_keys or not valid_keys:
+        return set()
+
+    valid_by_norm = {normalize_key(v): v for v in valid_keys}
+    aligned: set[str] = set()
+
+    for ck in cited_keys:
+        if ck in valid_keys:
+            aligned.add(ck)
+            continue
+        mapped = valid_by_norm.get(normalize_key(ck))
+        if mapped:
+            aligned.add(mapped)
+
+    return aligned
 
 
 def metric_citation_f1(final_tex: str, extracted_dir: Path) -> tuple[Optional[float], Optional[float], Optional[float], dict[str, list[str]]]:
@@ -427,9 +477,10 @@ def metric_citation_f1(final_tex: str, extracted_dir: Path) -> tuple[Optional[fl
         }
 
     cited_keys = extract_citation_keys(final_tex)
-    valid_keys = {p.stem for p in extracted_dir.glob("*.json")} if extracted_dir.exists() else set()
+    valid_keys = resolve_valid_keys(extracted_dir)
+    aligned_cited = _align_citations_to_valid(cited_keys, valid_keys)
 
-    inter = cited_keys & valid_keys
+    inter = aligned_cited & valid_keys
     precision = (len(inter) / len(cited_keys)) if cited_keys else 0.0
     recall = (len(inter) / len(valid_keys)) if valid_keys else 0.0
     if precision + recall > 0:
@@ -439,9 +490,10 @@ def metric_citation_f1(final_tex: str, extracted_dir: Path) -> tuple[Optional[fl
 
     details = {
         "cited_keys": sorted(cited_keys),
+        "aligned_cited_keys": sorted(aligned_cited),
         "valid_keys": sorted(valid_keys),
-        "invented_keys": sorted(cited_keys - valid_keys),
-        "missed_keys": sorted(valid_keys - cited_keys),
+        "invented_keys": sorted(cited_keys - aligned_cited),
+        "missed_keys": sorted(valid_keys - aligned_cited),
     }
 
     return round(precision, 4), round(recall, 4), round(f1, 4), details
@@ -465,11 +517,11 @@ def flatten_strings(value: Any) -> list[str]:
 
 def strip_latex_to_text(tex_text: str) -> str:
     # Remove environments
-    text = re.sub(r"\\\\begin\{[^}]+\}.*?\\\\end\{[^}]+\}", " ", tex_text, flags=re.DOTALL)
+    text = re.sub(r"\\begin\{[^}]+\}.*?\\end\{[^}]+\}", " ", tex_text, flags=re.DOTALL)
     # Remove commands with braces (simple approximation requested)
-    text = re.sub(r"\\\\[a-zA-Z]+\*?(\[[^\]]*\])?\{[^{}]*\}", " ", text)
+    text = re.sub(r"\\[a-zA-Z]+\*?(\[[^\]]*\])?\{[^{}]*\}", " ", text)
     # Remove standalone commands
-    text = re.sub(r"\\\\[a-zA-Z]+\*?", " ", text)
+    text = re.sub(r"\\[a-zA-Z]+\*?", " ", text)
     # Remove braces and collapse whitespace
     text = text.replace("{", " ").replace("}", " ")
     text = re.sub(r"\s+", " ", text)
@@ -513,12 +565,16 @@ def metric_rouge_l(final_tex: str, extracted_dir: Path) -> Optional[float]:
 
 def extract_headings(tex_text: str) -> list[str]:
     headings: list[str] = []
-    headings.extend(re.findall(r"\\\\section\*?\{([^}]*)\}", tex_text))
-    headings.extend(re.findall(r"\\\\subsection\*?\{([^}]*)\}", tex_text))
+    # LaTeX headings
+    headings.extend(re.findall(r"\\section\*?\{([^}]*)\}", tex_text))
+    headings.extend(re.findall(r"\\subsection\*?\{([^}]*)\}", tex_text))
+    # Markdown headings fallback (markdown-first pipeline)
+    headings.extend(re.findall(r"(?m)^#{1,3}\s+(.+)$", tex_text))
     return [h.strip() for h in headings if h.strip()]
 
 
 def maybe_embedding_match(phrase: str, headings: list[str], threshold: float = 0.6) -> bool:
+    global _HSR_EMBED_MODEL
     try:
         from sentence_transformers import SentenceTransformer
         import numpy as np
@@ -526,8 +582,9 @@ def maybe_embedding_match(phrase: str, headings: list[str], threshold: float = 0
         return False
 
     try:
-        model = SentenceTransformer("all-MiniLM-L6-v2")
-        embeddings = model.encode([phrase] + headings, convert_to_numpy=True)
+        if _HSR_EMBED_MODEL is None:
+            _HSR_EMBED_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
+        embeddings = _HSR_EMBED_MODEL.encode([phrase] + headings, convert_to_numpy=True)
         p = embeddings[0]
         hs = embeddings[1:]
         p_norm = np.linalg.norm(p)
@@ -595,13 +652,24 @@ def metric_hallucination(report_path: Path) -> tuple[Optional[float], Optional[b
 
     violations = report.get("violations", [])
     total_violations = len(violations) if isinstance(violations, list) else 0
-    total_claims = report.get("total_claims_checked", 1)
+    try:
+        total_claims_checked = int(report.get("total_claims_checked", 0) or 0)
+    except Exception:
+        total_claims_checked = 0
+    try:
+        total_claims_all = int(report.get("total_claims", 0) or 0)
+    except Exception:
+        total_claims_all = 0
+
+    # Prefer checked claims when sample size is meaningful; otherwise fall back.
+    total_claims = total_claims_checked if total_claims_checked >= 5 else total_claims_all
     try:
         total_claims_num = int(total_claims)
     except Exception:
         total_claims_num = 1
     if total_claims_num <= 0:
-        total_claims_num = 1
+        warn("M7 low-confidence: verifier checked too few claims; hallucination rate suppressed")
+        return None, bool(report.get("repair_triggered", False)), total_violations, total_claims_checked
 
     rate = total_violations / total_claims_num
     return round(rate, 4), bool(report.get("repair_triggered", False)), total_violations, total_claims_num
@@ -658,7 +726,7 @@ def gather_stage_timings(pipeline_start: Optional[float] = None) -> dict[str, An
         ("build_graph", [ROOT / "artifacts" / "clusters" / "citation_graph.json"]),
         ("cluster", [ROOT / "artifacts" / "clusters" / "clusters.json", ROOT / "artifacts" / "clusters" / "preclusters.json"]),
         ("synthesis", [ROOT / "artifacts" / "synthesis" / "synthesis.json"]),
-        ("writer", [ROOT / "artifacts" / "soa" / "state_of_the_art_draft.tex", ROOT / "artifacts" / "soa" / "state_of_the_art.tex"]),
+        ("writer", [ROOT / "artifacts" / "soa" / "state_of_the_art_draft.md", ROOT / "artifacts" / "soa" / "state_of_the_art.md", ROOT / "artifacts" / "soa" / "state_of_the_art.tex"]),
         ("reflector", [ROOT / "artifacts" / "soa" / "reflector_feedback.json"]),
         ("rubric_evaluator", [ROOT / "artifacts" / "soa" / "rubric_report.json"]),
         ("verifier", [ROOT / "artifacts" / "soa" / "hallucination_report.json"]),

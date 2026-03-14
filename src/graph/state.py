@@ -33,6 +33,7 @@ class SOAState(TypedDict):
     raw_clusters: Optional[dict]  # Precomputed similarity clusters
     clusters: Optional[dict]  # LLM-interpreted clusters
     synthesis: Optional[dict]  # Cross-paper synthesis
+    synthesis_paper_coverage: float  # Fraction of extracted papers referenced in synthesis text (default 0.0)
     soa_draft: Optional[str]  # Current version of LaTeX SoA
     prisma_metadata: Optional[dict]  # PRISMA search methodology metadata (if papers auto-fetched)
     citation_graph: Optional[dict]  # Directed graph of citation + thematic links
@@ -48,7 +49,14 @@ class SOAState(TypedDict):
     # ===== VERIFICATION & REPAIR =====
     verification_results: Optional[list[dict]]  # Hallucination violations
     verification_passed: bool  # True if no violations found
+    hallucination_report: dict  # Verifier report payload (default {})
     repair_iteration: int  # Current repair attempt (0-indexed)
+
+    # ===== TIMING =====
+    pipeline_start_time: float  # Epoch seconds at pipeline start (default 0.0)
+    stage_start_times: dict[str, float]  # Start timestamp per stage (default {})
+    stage_durations: dict[str, float]  # Elapsed seconds per stage (default {})
+    total_wall_clock_seconds: float  # End-to-end wall clock time (default 0.0)
     
     # ===== METADATA =====
     pipeline_stage: str  # Current stage name for logging

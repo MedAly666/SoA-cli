@@ -10,6 +10,11 @@ LangGraph merges the returned dict with the existing state.
 """
 
 import json  # Keep for LLM prompt formatting
+import re
+import time
+import subprocess
+from datetime import datetime
+from functools import wraps
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -20,7 +25,6 @@ from .state import SOAState
 
 # Import utilities from parent src package
 import sys
-from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from theme_builder import build_thematic_contract, inject_theme_into_input
@@ -80,6 +84,50 @@ def _write_json(path: str, payload: dict) -> None:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, 'w', encoding='utf-8') as f:
         json.dump(payload, f, indent=2)
+
+
+def _count_citations_in_text(text: str) -> int:
+    """Count citations in either pandoc markdown or LaTeX citation forms."""
+    latex_count = len(re.findall(r'\\cite\{[^}]+\}', text))
+    md_count = len(re.findall(r'\[@[^\]]+\]', text))
+    md_inline_count = len(re.findall(r'(?<!\w)@[A-Za-z0-9_:\-.]+', text))
+    return max(latex_count, md_count + md_inline_count)
+
+
+def _with_timing(state: SOAState, result: dict, stage_name: str, started_at: float) -> dict:
+    """Merge timing updates into node result."""
+    elapsed = time.time() - started_at
+    stage_start_times = dict(state.get("stage_start_times") or {})
+    stage_durations = dict(state.get("stage_durations") or {})
+
+    # Preserve any updates the node already returned.
+    stage_start_times.update(result.get("stage_start_times") or {})
+    stage_durations.update(result.get("stage_durations") or {})
+
+    stage_start_times[stage_name] = started_at
+    stage_durations[stage_name] = round(elapsed, 3)
+
+    result["stage_start_times"] = stage_start_times
+    result["stage_durations"] = stage_durations
+    print(f"[TIMING] {stage_name}: {elapsed:.1f}s")
+    return result
+
+
+def record_timing(stage_name: str):
+    """Decorator to instrument node runtime and persist it in state."""
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(state: SOAState) -> dict:
+            started_at = time.time()
+            result = func(state)
+            if not isinstance(result, dict):
+                result = {}
+            return _with_timing(state, result, stage_name, started_at)
+
+        return wrapper
+
+    return decorator
 
 
 def extract_pdf_text(pdf_path: str, max_chars: int | None = None) -> tuple[str, dict]:
@@ -340,46 +388,50 @@ def call_llm(system_prompt_path: str, input_data: dict, output_path: str, max_re
     # Prepare input as user prompt
     input_json = json.dumps(input_data, indent=2)
     
-    # Writer and repair nodes should output LaTeX, not JSON
-    is_latex_output = 'writer' in system_prompt_path or 'repair' in system_prompt_path
+    # Writer and repair nodes should output Markdown, not JSON
+    is_markdown_output = 'writer' in system_prompt_path or 'repair' in system_prompt_path
 
-    def _validate_latex_output(text: str) -> tuple[bool, str]:
-        """Validate generated LaTeX to catch truncation/corruption before saving."""
+    def _validate_markdown_output(text: str) -> tuple[bool, str]:
+        """Validate generated Markdown for writer/repair outputs."""
         stripped = text.strip()
 
         if stripped.startswith("```"):
-            return False, "Output contains markdown code fences instead of raw LaTeX"
+            return False, "Output contains wrapper code fences instead of raw Markdown"
 
-        if "\\documentclass" not in text:
-            return False, "Missing \\documentclass"
+        if "\\documentclass" in text:
+            return False, "Output appears to be LaTeX, expected Markdown"
 
-        if "\\begin{document}" not in text:
-            return False, "Missing \\begin{document}"
+        if len(stripped) < 500:
+            return False, "Markdown output is too short/incomplete"
 
-        if "\\end{document}" not in text:
-            return False, "Missing \\end{document} (likely truncated output)"
+        if not re.search(r'(?m)^#{1,3}\s+', text):
+            return False, "Markdown should contain section headings"
 
         if "/* Lines" in text or "omitted */" in text:
             return False, "Contains placeholder/truncation markers (e.g., /* Lines ... omitted */)"
 
-        # Basic structural sanity: begin must appear before end.
-        if text.find("\\begin{document}") > text.find("\\end{document}"):
-            return False, "Document structure is invalid (end appears before begin)"
-
         return True, ""
     
-    if is_latex_output:
-        # For LaTeX output: Don't force JSON format
+    if is_markdown_output:
+        # For Markdown output: Don't force JSON format
         user_prompt = f"""# Input
 
 ```json
 {input_json}
 ```
 
-CRITICAL: Output ONLY the complete, compilable LaTeX document itself. Do NOT output a description, summary, or explanation. Start immediately with \\documentclass and end with \\end{{document}}. The output will be saved directly as a .tex file and must be ready to compile.
+CRITICAL: Output ONLY a complete academic Markdown document (no JSON, no explanation text, no code fences).
+The output will be saved directly as a `.md` file and later converted to LaTeX.
+
+Use Pandoc-compatible markdown:
+- Headings: `#`, `##`, `###`
+- Citations: use `[@paper_id]` format
+- Figures: `![Caption](path/to/figure.png){{#fig:label width=80%}}`
+- Tables: pipe tables with a caption line above or below
+- Equations: `$...$` and `$$...$$`
 
 The document MUST be complete and self-contained. Never output placeholders such as "/* Lines ... omitted */" or partial/truncated sections.
-If you are close to output limits, reduce verbosity but ALWAYS finish with valid LaTeX and \\end{{document}}.
+If you are close to output limits, reduce verbosity but ALWAYS finish with complete valid Markdown.
 
 Follow ALL formatting instructions in the system prompt exactly."""
     else:
@@ -399,7 +451,7 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
         timeout = int(os.getenv('LLM_TIMEOUT', '300'))
         print(f"  [LLM Config] Provider: {provider}, Model: {model or 'default'}, Timeout: {timeout}s")
     
-    # Retry loop for JSON and LaTeX outputs
+    # Retry loop for JSON and Markdown outputs
     for attempt in range(max_retries):
         # Call LLM via unified client
         client = LLMClient()
@@ -441,32 +493,29 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
                     f.write(error_json)
                 return error_json
         else:
-            # Non-JSON output (LaTeX), validate integrity to catch truncation.
-            is_valid_latex, latex_error = _validate_latex_output(output_text)
-            if is_valid_latex:
-                print("  ✓ Valid LaTeX received")
+            # Non-JSON output (Markdown), validate integrity to catch truncation.
+            is_valid_markdown, md_error = _validate_markdown_output(output_text)
+            if is_valid_markdown:
+                print("  ✓ Valid Markdown received")
                 break
 
-            print(f"  ⚠️  Invalid LaTeX from LLM (attempt {attempt + 1}/{max_retries}): {latex_error}")
+            print(f"  ⚠️  Invalid Markdown from LLM (attempt {attempt + 1}/{max_retries}): {md_error}")
             if attempt < max_retries - 1:
                 print("  ↻ Retrying with stricter completion instruction...")
                 user_prompt += (
                     "\n\nIMPORTANT RETRY INSTRUCTION: Your previous output was invalid because: "
-                    f"{latex_error}. "
-                    "Return ONLY a complete LaTeX document with no placeholders, no markdown fences, "
-                    "and ensure the final line is \\end{document}."
+                    f"{md_error}. "
+                    "Return ONLY complete Pandoc-compatible Markdown with no placeholders "
+                    "and include proper headings and citations."
                 )
                 continue
 
-            # All retries exhausted for LaTeX output
-            print(f"  ✗ All {max_retries} attempts produced invalid LaTeX")
+            # All retries exhausted for Markdown output
+            print(f"  ✗ All {max_retries} attempts produced invalid Markdown")
             output_text = (
-                "\\documentclass{article}\n"
-                "\\begin{document}\n"
-                "\\section*{Generation Error}\n"
-                "The LLM did not return a valid complete LaTeX document after "
-                f"{max_retries} attempts. Last error: {latex_error}\n"
-                "\\end{document}\n"
+                "# Generation Error\n\n"
+                "The LLM did not return a valid complete Markdown document after "
+                f"{max_retries} attempts. Last error: {md_error}\n"
             )
             break
     
@@ -480,6 +529,7 @@ Generate the output as valid JSON. Return ONLY the JSON with no markdown formatt
 
 # ========== NODE FUNCTIONS ==========
 
+@record_timing("theme_builder")
 def theme_builder_node(state: SOAState) -> dict:
     """
     Build thematic contract (runs once at start).
@@ -517,6 +567,7 @@ def theme_builder_node(state: SOAState) -> dict:
         }
 
 
+@record_timing("reader")
 def reader_map_node(state: SOAState) -> dict:
     """
     Process all PDFs in parallel (Reader agent).
@@ -618,6 +669,7 @@ def reader_map_node(state: SOAState) -> dict:
     }
 
 
+@record_timing("extractor")
 def extractor_map_node(state: SOAState) -> dict:
     """
     Extract structured facts from papers (Extractor agent).
@@ -714,6 +766,7 @@ def extractor_map_node(state: SOAState) -> dict:
     }
 
 
+@record_timing("critic")
 def critic_map_node(state: SOAState) -> dict:
     """
     Evaluate methodological strength (Critic agent).
@@ -806,6 +859,7 @@ def critic_map_node(state: SOAState) -> dict:
     }
 
 
+@record_timing("vectorize")
 def vectorize_node(state: SOAState) -> dict:
     """
     Create embeddings for clustering (non-LLM).
@@ -858,6 +912,7 @@ def vectorize_node(state: SOAState) -> dict:
         }
 
 
+@record_timing("build_graph")
 def build_graph_node(state: SOAState) -> dict:
     """
     Build hierarchical citation graph using extracted papers + embedding similarity.
@@ -901,6 +956,7 @@ def build_graph_node(state: SOAState) -> dict:
         }
 
 
+@record_timing("cluster")
 def cluster_node(state: SOAState) -> dict:
     """
     Run similarity clustering (non-LLM).
@@ -942,6 +998,7 @@ def cluster_node(state: SOAState) -> dict:
         }
 
 
+@record_timing("interpret_clusters")
 def interpret_clusters_node(state: SOAState) -> dict:
     """
     LLM interpretation of clusters.
@@ -1001,6 +1058,7 @@ def interpret_clusters_node(state: SOAState) -> dict:
         }
 
 
+@record_timing("synthesis")
 def synthesis_node(state: SOAState) -> dict:
     """
     Cross-paper synthesis.
@@ -1044,13 +1102,29 @@ def synthesis_node(state: SOAState) -> dict:
         )
         
         result = json.loads(output_text)
+
+        paper_ids = sorted([p.stem for p in Path("artifacts/extracted").glob("*.json")])
+        mentioned_ids = [pid for pid in paper_ids if pid in output_text]
+        coverage = (len(mentioned_ids) / len(paper_ids)) if paper_ids else 0.0
+        print(f"[SYNTHESIS] Paper coverage: {coverage:.1%} ({len(mentioned_ids)}/{len(paper_ids)})")
+
+        synthesis_errors: list[dict] = []
+        if paper_ids and coverage < 0.5:
+            synthesis_errors.append({
+                "node": "synthesis",
+                "error": (
+                    f"SYNTHESIS_LOW_COVERAGE: only {len(mentioned_ids)}/{len(paper_ids)} "
+                    f"papers referenced in synthesis ({coverage:.1%}). Consider re-running."
+                )
+            })
         
         print(f"  ✓ Synthesis complete")
         
         return {
             "synthesis": result,
+            "synthesis_paper_coverage": round(coverage, 4),
             "pipeline_stage": "synthesis_complete",
-            "errors": []
+            "errors": synthesis_errors
         }
         
     except Exception as e:
@@ -1065,9 +1139,10 @@ def synthesis_node(state: SOAState) -> dict:
         }
 
 
+@record_timing("writer")
 def writer_node(state: SOAState) -> dict:
     """
-    Generate LaTeX State of the Art.
+    Generate Markdown State of the Art and convert to LaTeX.
     
     Returns:
         Partial state with soa_draft
@@ -1094,6 +1169,91 @@ def writer_node(state: SOAState) -> dict:
     try:
         # Prepare input
         agent_input = inject_contract(synthesis, contract)
+
+        extracted_dir = Path("artifacts/extracted")
+        paper_ids = sorted([f.stem for f in extracted_dir.glob("*.json")])
+        paper_ids_str = "\n".join(f"  - {pid}" for pid in paper_ids) if paper_ids else "  - NO_PAPERS_FOUND"
+
+        # Build paper reference sheet and numerical grounding context from extracted artifacts.
+        reference_lines: list[str] = []
+        numerical_facts: list[str] = []
+        unit_pattern = r"\d+\.?\d*\s*(?:%|ms|s|min|hours?|km|m²)"
+
+        for json_file in extracted_dir.glob("*.json"):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    pdata = json.load(f)
+            except Exception:
+                continue
+
+            pid = json_file.stem
+            title = str(pdata.get("title", "Untitled")).strip()
+            key_findings = pdata.get("key_findings", [])
+            top_findings: list[str] = []
+            if isinstance(key_findings, list):
+                for item in key_findings:
+                    if isinstance(item, str) and item.strip():
+                        top_findings.append(item.strip())
+                    if len(top_findings) >= 3:
+                        break
+            findings_part = "; ".join(top_findings) if top_findings else "No key findings available"
+            reference_lines.append(f"[{pid}]: {title} — {findings_part}")
+
+            for field_name, field_value in pdata.items():
+                if isinstance(field_value, str):
+                    if re.findall(unit_pattern, field_value):
+                        numerical_facts.append(f"[{pid}] {field_name}: {field_value[:200]}")
+                elif isinstance(field_value, list):
+                    for item in field_value[:3]:
+                        if isinstance(item, str) and re.findall(unit_pattern, item):
+                            numerical_facts.append(f"[{pid}] {item[:200]}")
+
+        # Inject grounding materials into user prompt payload (serialized JSON user prompt).
+        agent_input["paper_ids_list"] = paper_ids
+        agent_input["paper_reference_sheet"] = (
+            "PAPER REFERENCE SHEET\n" + "\n".join(reference_lines)
+            if reference_lines else "PAPER REFERENCE SHEET\nNo extracted papers found."
+        )
+        if numerical_facts:
+            agent_input["key_numerical_results_to_preserve"] = (
+                "KEY NUMERICAL RESULTS TO PRESERVE\n" + "\n".join(numerical_facts[:100])
+            )
+
+        # Inject synthesis intelligence blocks for originality and cross-paper writing.
+        try:
+            synthesis_json_path = Path("artifacts/synthesis/synthesis.json")
+            synth_payload = {}
+            if synthesis_json_path.exists():
+                with open(synthesis_json_path, "r", encoding="utf-8") as f:
+                    synth_payload = json.load(f)
+
+            contradictions = synth_payload.get("contradictions", []) if isinstance(synth_payload, dict) else []
+            convergences = synth_payload.get("convergences", []) if isinstance(synth_payload, dict) else []
+            gaps = synth_payload.get("gaps", []) if isinstance(synth_payload, dict) else []
+
+            contradiction_lines = [
+                f"- {c.get('claim', '')} | papers={c.get('paper_ids', [])} | resolution={c.get('resolution', 'unknown')}"
+                for c in contradictions if isinstance(c, dict)
+            ]
+            convergence_lines = [
+                f"- {c.get('claim', '')} | papers={c.get('paper_ids', [])} | confidence={c.get('confidence', 'unknown')}"
+                for c in convergences if isinstance(c, dict)
+            ]
+            gap_lines = [
+                f"- {g.get('gap', '')} | evidence={g.get('evidence_paper_ids', [])}"
+                for g in gaps if isinstance(g, dict)
+            ]
+
+            synth_intel = ["SYNTHESIS INTELLIGENCE"]
+            synth_intel.append("KNOWN CONTRADICTIONS")
+            synth_intel.extend(contradiction_lines or ["- None"])
+            synth_intel.append("ESTABLISHED CONSENSUS")
+            synth_intel.extend(convergence_lines or ["- None"])
+            synth_intel.append("IDENTIFIED GAPS")
+            synth_intel.extend(gap_lines or ["- None"])
+            agent_input["synthesis_intelligence"] = "\n".join(synth_intel)
+        except Exception as e:
+            print(f"[WRITER] Warning: could not load synthesis intelligence ({e})")
 
         # Add graph grounding summary
         agent_input["citation_graph"] = citation_graph
@@ -1123,24 +1283,94 @@ def writer_node(state: SOAState) -> dict:
         input_path = "artifacts/soa/_writer_input.json"
         _write_json(input_path, agent_input)
         
+        # Build runtime system prompt with paper IDs injected.
+        writer_prompt_path = Path("prompts/writer.system.txt")
+        runtime_prompt_path = Path("artifacts/soa/_writer_runtime.system.txt")
+        try:
+            system_prompt_text = writer_prompt_path.read_text(encoding="utf-8")
+            system_prompt_text = system_prompt_text.replace("{PAPER_IDS_LIST}", paper_ids_str)
+            runtime_prompt_path.parent.mkdir(parents=True, exist_ok=True)
+            runtime_prompt_path.write_text(system_prompt_text, encoding="utf-8")
+        except Exception as e:
+            print(f"[WRITER] Warning: failed to prepare runtime system prompt ({e}), using default prompt file")
+            runtime_prompt_path = writer_prompt_path
+
         # Call LLM
         output_text = call_llm(
-            "prompts/writer.system.txt",
+            str(runtime_prompt_path),
             agent_input,
-            "artifacts/soa/state_of_the_art_draft.tex"  # Save draft for debugging
+            "artifacts/soa/state_of_the_art_draft.md"  # Save draft markdown for debugging
         )
 
-        # Save canonical working file for downstream evaluator nodes.
+        # Citation sanity check and single retry if zero citations.
+        citation_count_initial = _count_citations_in_text(output_text)
+        if citation_count_initial == 0:
+            print("[WRITER] zero citations detected, retrying with stricter instruction")
+            writer_errors = []
+            writer_errors.append({
+                "node": "writer",
+                "error": "WRITER_NO_CITATIONS: writer produced zero citations. Retrying with stricter prompt."
+            })
+            retry_suffix = (
+                "\n\nCRITICAL: Your previous output had ZERO citations. "
+                "This is unacceptable for an academic paper. Rewrite the entire text. "
+                "Every paragraph MUST contain at least one citation marker in `[@paper_id]` format. "
+                "Start your output with a sentence that contains at least one citation marker."
+            )
+            retry_input = dict(agent_input)
+            retry_input["retry_suffix_instruction"] = retry_suffix
+            output_text = call_llm(
+                str(runtime_prompt_path),
+                retry_input,
+                "artifacts/soa/state_of_the_art_draft.md"
+            )
+        else:
+            writer_errors = []
+
+        # Save canonical markdown file for downstream evaluator nodes.
         Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
-        with open("artifacts/soa/state_of_the_art.tex", 'w', encoding='utf-8') as f:
+        with open("artifacts/soa/state_of_the_art.md", 'w', encoding='utf-8') as f:
             f.write(output_text)
+
+        # Convert markdown output to LaTeX for validator/benchmark/tooling compatibility.
+        try:
+            converter_script = Path("scripts/markdown_to_latex.py")
+            converter_cmd = [
+                sys.executable,
+                str(converter_script),
+                "--input", "artifacts/soa/state_of_the_art.md",
+                "--output", "artifacts/soa/state_of_the_art.tex",
+                "--auto-bib-from-extracted", "artifacts/extracted",
+                "--ensure-pandoc",
+                "--standalone",
+            ]
+            proc = subprocess.run(converter_cmd, capture_output=True, text=True)
+            if proc.returncode != 0:
+                raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "markdown conversion failed")
+
+            # Legacy final output sync for downstream tools expecting *_final.tex.
+            with open("artifacts/soa/state_of_the_art.tex", 'r', encoding='utf-8') as src_f:
+                latex_text = src_f.read()
+            with open("artifacts/soa/state_of_the_art_final.tex", 'w', encoding='utf-8') as f:
+                f.write(latex_text)
+        except Exception as e:
+            writer_errors.append({
+                "node": "writer",
+                "error": f"WRITER_MD_TO_TEX_CONVERSION_FAILED: {e}",
+            })
+            print(f"[WRITER] Warning: markdown-to-latex conversion failed ({e})")
+
+        citation_count = _count_citations_in_text(output_text)
+        paragraphs = [p for p in re.split(r"\n\s*\n", output_text) if p.strip()]
+        cited_paragraphs = [p for p in paragraphs if _count_citations_in_text(p) > 0]
+        print(f"[WRITER] {citation_count} citations injected across {len(cited_paragraphs)} paragraphs.")
         
         print(f"  ✓ State of the Art generated ({len(output_text)} chars)")
         
         return {
             "soa_draft": output_text,
             "pipeline_stage": "writer_complete",
-            "errors": []
+            "errors": writer_errors
         }
         
     except Exception as e:
@@ -1155,6 +1385,7 @@ def writer_node(state: SOAState) -> dict:
         }
 
 
+@record_timing("reflector")
 def reflector_node(state: SOAState) -> dict:
     """
     Hierarchical reflector (L1 outline -> L2 section -> L3 paragraph).
@@ -1162,9 +1393,10 @@ def reflector_node(state: SOAState) -> dict:
     Returns:
         Partial state with reflector_feedback and reflector_passed_level.
     """
-    return run_reflector(state, llm_caller=call_llm)
+    return run_reflector(dict(state), llm_caller=call_llm)
 
 
+@record_timing("rubric_evaluator")
 def rubric_evaluator_node(state: SOAState) -> dict:
     """
     Multi-dimensional rubric scoring node.
@@ -1172,9 +1404,10 @@ def rubric_evaluator_node(state: SOAState) -> dict:
     Returns:
         Partial state with rubric_scores and rubric_failing dimensions.
     """
-    return run_rubric_evaluator(state, llm_caller=call_llm)
+    return run_rubric_evaluator(dict(state), llm_caller=call_llm)
 
 
+@record_timing("verifier")
 def verifier_node(state: SOAState) -> dict:
     """
     Check for hallucinations.
@@ -1183,74 +1416,106 @@ def verifier_node(state: SOAState) -> dict:
         Partial state with verification_results and verification_passed
     """
     print("\n[Node: Verifier]")
-    soa_draft = state["soa_draft"]
-    extracted = state["extracted_facts"]
-    critics = state["critic_assessments"]
-    
-    # Check if SOA draft exists
-    if not soa_draft:
-        print("  ERROR: No SOA draft to verify (Writer node may have failed)")
-        return {
-            "verification_results": None,
-            "verification_passed": False,
-            "pipeline_stage": "verifier_failed",
-            "errors": [{
-                "node": "verifier",
-                "error": "No SOA draft available for verification"
-            }]
-        }
-    
+    extracted = state.get("extracted_facts", {}) or {}
+    critics = state.get("critic_assessments", {}) or {}
+
+    report = {
+        "run_timestamp": datetime.now().isoformat(),
+        "status": "completed",
+        "total_claims_checked": 0,
+        "total_violations": 0,
+        "violations": [],
+        "hallucination_rate": 0.0,
+        "repair_triggered": False,
+        "layers_executed": [],
+        "error": None,
+    }
+
+    verification_errors: list[dict] = []
+    passed = False
+
     try:
-        # Split into sentences
-        sentences = []
-        for line_num, line in enumerate(soa_draft.split('\n'), 1):
-            # Skip LaTeX commands and empty lines
-            if line.strip() and not line.strip().startswith('\\') and not line.strip().startswith('%'):
-                sentences.append({
-                    "text": line.strip(),
-                    "line_number": line_num
-                })
-        
-        # Verify each sentence (simplified - full implementation would be more sophisticated)
-        violations = []
-        checked = 0
-        
-        print(f"  Verifying {len(sentences)} sentences...")
-        
-        for sent in sentences[:50]:  # Limit for now
-            # Check for ungrounded claims (simplified)
-            # In production, this would call verify_claim_grounding from repair_loop
-            checked += 1
-        
-        # For now, assume verification passes (full implementation would check claims)
-        passed = len(violations) == 0
-        
-        print(f"  Checked: {checked} sentences")
-        print(f"  Violations: {len(violations)}")
-        print(f"  Status: {'PASS' if passed else 'FAIL'}")
-        
-        return {
-            "verification_results": violations,
-            "verification_passed": passed,
-            "pipeline_stage": "verifier_complete",
-            "errors": []
-        }
-        
+        from hallucination_detector import run_hallucination_checks, resolve_tex_path, count_cited_claims
+
+        tex_path = resolve_tex_path()
+        tex_content = tex_path.read_text(encoding="utf-8", errors="ignore")
+
+        claim_count, _ = count_cited_claims(tex_content)
+        report["total_claims_checked"] = claim_count
+
+        if claim_count == 0:
+            report["status"] = "skipped_no_citations"
+            report["error"] = "No cited sentences found in LaTeX output. Run Fix 1 first."
+            report["layers_executed"] = []
+        else:
+            extracted_db = {
+                pid: pdata for pid, pdata in extracted.items()
+                if isinstance(pdata, dict) and "error" not in pdata
+            }
+            critic_db = {
+                pid: pdata for pid, pdata in critics.items()
+                if isinstance(pdata, dict) and "error" not in pdata
+            }
+
+            detector_report = run_hallucination_checks(tex_content, extracted_db, critic_db)
+            details = detector_report.get("details", []) if isinstance(detector_report, dict) else []
+            total_violations = int(detector_report.get("total_violations", len(details))) if isinstance(detector_report, dict) else len(details)
+
+            report["status"] = "completed"
+            report["total_violations"] = total_violations
+            report["violations"] = details if isinstance(details, list) else []
+            report["hallucination_rate"] = (
+                total_violations / report["total_claims_checked"]
+                if report["total_claims_checked"] > 0 else 0.0
+            )
+            report["repair_triggered"] = total_violations > 0
+            report["layers_executed"] = [
+                "claim_grounding",
+                "citation_verification",
+                "fact_coverage",
+                "contradiction_check",
+            ]
+
+        passed = report["total_violations"] == 0 and report["status"] in {"completed", "partial"}
+
     except Exception as e:
-        print(f"  ERROR: {e}")
-        return {
-            "verification_results": [],
-            "verification_passed": False,
-            "errors": [{
+        report["status"] = "failed"
+        report["error"] = str(e)
+        report["repair_triggered"] = False
+        verification_errors.append({
+            "node": "verifier",
+            "error": f"VERIFIER_FAILED: {e}"
+        })
+        print(f"[VERIFIER] ERROR: {e}")
+
+    finally:
+        try:
+            Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
+            with open("artifacts/soa/hallucination_report.json", "w", encoding="utf-8") as f:
+                json.dump(report, f, indent=2)
+            print(
+                f"[VERIFIER] Report written: {report['total_violations']} violations "
+                f"in {report['total_claims_checked']} claims checked."
+            )
+        except Exception as write_err:
+            verification_errors.append({
                 "node": "verifier",
-                "error": str(e)
-            }]
-        }
+                "error": f"VERIFIER_REPORT_WRITE_FAILED: {write_err}"
+            })
+
+    return {
+        "verification_results": report.get("violations", []),
+        "verification_passed": passed,
+        "hallucination_report": report,
+        "pipeline_stage": "verifier_complete" if report.get("status") != "failed" else "verifier_failed",
+        "errors": verification_errors,
+    }
 
 
+@record_timing("repair")
 def repair_node(state: SOAState) -> dict:
     """
-    Repair hallucinated sentences.
+    Repair hallucinated content in Markdown and regenerate LaTeX.
     
     Returns:
         Partial state with updated soa_draft and incremented repair_iteration
@@ -1303,12 +1568,32 @@ def repair_node(state: SOAState) -> dict:
         repaired_draft = call_llm(
             "prompts/repair.system.txt",
             repair_input,
-            "artifacts/soa/state_of_the_art_repaired.tex"
+            "artifacts/soa/state_of_the_art_repaired.md"
         )
 
-        # Keep canonical path in sync for downstream tooling.
-        with open("artifacts/soa/state_of_the_art.tex", 'w', encoding='utf-8') as f:
+        # Keep canonical markdown path in sync for downstream tooling.
+        with open("artifacts/soa/state_of_the_art.md", 'w', encoding='utf-8') as f:
             f.write(repaired_draft)
+
+        # Re-generate LaTeX after repair.
+        converter_script = Path("scripts/markdown_to_latex.py")
+        converter_cmd = [
+            sys.executable,
+            str(converter_script),
+            "--input", "artifacts/soa/state_of_the_art.md",
+            "--output", "artifacts/soa/state_of_the_art.tex",
+            "--auto-bib-from-extracted", "artifacts/extracted",
+            "--ensure-pandoc",
+            "--standalone",
+        ]
+        proc = subprocess.run(converter_cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "markdown conversion failed during repair")
+
+        with open("artifacts/soa/state_of_the_art.tex", 'r', encoding='utf-8') as src_f:
+            latex_text = src_f.read()
+        with open("artifacts/soa/state_of_the_art_final.tex", 'w', encoding='utf-8') as f:
+            f.write(latex_text)
         
         print(f"  ✓ Repair complete")
         
@@ -1327,3 +1612,46 @@ def repair_node(state: SOAState) -> dict:
                 "error": str(e)
             }]
         }
+
+
+@record_timing("final_output")
+def final_output_node(state: SOAState) -> dict:
+    """Finalize run metadata and persist timing summary."""
+    print("\n[Node: Final Output]")
+
+    pipeline_start = float(state.get("pipeline_start_time", 0.0) or 0.0)
+    total_seconds = (time.time() - pipeline_start) if pipeline_start > 0 else 0.0
+    total_minutes = total_seconds / 60.0
+
+    stage_durations = dict(state.get("stage_durations") or {})
+    non_zero = {k: v for k, v in stage_durations.items() if isinstance(v, (int, float)) and v >= 0.0}
+
+    slowest_stage = None
+    fastest_stage = None
+    if non_zero:
+        slowest_stage = max(non_zero.items(), key=lambda kv: kv[1])[0]
+        fastest_stage = min(non_zero.items(), key=lambda kv: kv[1])[0]
+
+    print(f"[TIMING] Total pipeline: {total_minutes:.1f} minutes")
+
+    timing_summary = {
+        "total_seconds": round(total_seconds, 3),
+        "total_minutes": round(total_minutes, 3),
+        "stage_durations": non_zero,
+        "slowest_stage": slowest_stage,
+        "fastest_stage": fastest_stage,
+    }
+
+    try:
+        timing_path = Path("artifacts/benchmark/timing_report.json")
+        timing_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(timing_path, "w", encoding="utf-8") as f:
+            json.dump(timing_summary, f, indent=2)
+    except Exception as e:
+        print(f"[TIMING] Warning: failed to write timing report ({e})")
+
+    return {
+        "total_wall_clock_seconds": round(total_seconds, 3),
+        "pipeline_stage": "final_output_complete",
+        "errors": [],
+    }
