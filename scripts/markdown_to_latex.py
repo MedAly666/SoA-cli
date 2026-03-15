@@ -52,6 +52,350 @@ def _extract_ids_from_cites(text: str) -> set[str]:
     return ids
 
 
+def _load_citation_map(path: Path | None) -> dict[str, str]:
+    """Load canonical->source citation map from JSON file."""
+    if path is None or not path.exists():
+        return {}
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(obj, dict):
+        return {}
+    if isinstance(obj.get("canonical_to_source"), dict):
+        obj = obj["canonical_to_source"]
+
+    out: dict[str, str] = {}
+    for k, v in obj.items():
+        ks = str(k).strip()
+        vs = _safe_bib_id(str(v).strip())
+        if ks and vs:
+            out[ks] = vs
+    return out
+
+
+def _extract_title_and_abstract_metadata(markdown_text: str) -> tuple[str | None, str | None]:
+    """Extract title/abstract metadata, preferring YAML front matter."""
+    title: str | None = None
+    abstract: str | None = None
+
+    # Prefer YAML front matter metadata when available.
+    if markdown_text.startswith("---\n"):
+        end_idx = markdown_text.find("\n---\n", 4)
+        if end_idx != -1:
+            yaml_block = markdown_text[4:end_idx]
+            title_match = re.search(r'(?mi)^title:\s*"?(.+?)"?\s*$', yaml_block)
+            if title_match:
+                title = title_match.group(1).strip()
+
+            abs_match = re.search(r"(?mis)^abstract:\s*\|\s*\n(?P<body>(?:\s{2}.+\n?)*)", yaml_block)
+            if abs_match:
+                raw_lines = [ln[2:] if ln.startswith("  ") else ln for ln in abs_match.group("body").splitlines()]
+                abstract = "\n".join(raw_lines).strip() or None
+
+    # Fallback to heading-based extraction.
+    lines = markdown_text.splitlines()
+    if title is None:
+        for line in lines:
+            if not line.strip():
+                continue
+            m = re.match(r"^#\s+(.+?)\s*$", line.strip())
+            if m:
+                title = m.group(1).strip()
+            break
+
+    if abstract is None:
+        abs_start = -1
+        abs_level = 0
+        for idx, line in enumerate(lines):
+            hm = re.match(r"^(#{1,3})\s+abstract\s*$", line.strip(), flags=re.IGNORECASE)
+            if hm:
+                abs_start = idx
+                abs_level = len(hm.group(1))
+                break
+
+        if abs_start >= 0:
+            j = abs_start + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+            para: list[str] = []
+            while j < len(lines):
+                line = lines[j]
+                hm = re.match(r"^(#{1,6})\s+", line.strip())
+                if hm and len(hm.group(1)) <= abs_level:
+                    break
+                if not line.strip() and para:
+                    break
+                if line.strip():
+                    para.append(line.strip())
+                j += 1
+            if para:
+                abstract = " ".join(para).strip()
+
+    return title, abstract
+
+
+def _extract_title_abstract_and_body(markdown_text: str) -> tuple[str | None, str | None, str]:
+    """Extract title/abstract from body headings and return cleaned survey body."""
+    lines = markdown_text.splitlines()
+
+    title: str | None = None
+    first_nonempty = next((i for i, ln in enumerate(lines) if ln.strip()), None)
+    if first_nonempty is not None:
+        m = re.match(r"^#\s+(.+?)\s*$", lines[first_nonempty].strip())
+        if m:
+            title = m.group(1).strip()
+            del lines[first_nonempty]
+            while first_nonempty < len(lines) and not lines[first_nonempty].strip():
+                del lines[first_nonempty]
+
+    abstract: str | None = None
+    abs_start = -1
+    abs_level = 0
+    for idx, line in enumerate(lines):
+        hm = re.match(r"^(#{1,3})\s+abstract\s*$", line.strip(), flags=re.IGNORECASE)
+        if hm:
+            abs_start = idx
+            abs_level = len(hm.group(1))
+            break
+
+    if abs_start >= 0:
+        j = abs_start + 1
+        while j < len(lines) and not lines[j].strip():
+            j += 1
+
+        para: list[str] = []
+        k = j
+        while k < len(lines):
+            line = lines[k]
+            hm = re.match(r"^(#{1,6})\s+", line.strip())
+            if hm and len(hm.group(1)) <= abs_level:
+                break
+            if not line.strip() and para:
+                break
+            if line.strip():
+                para.append(line.strip())
+            k += 1
+
+        if para:
+            abstract = " ".join(para).strip()
+
+        # Remove abstract section from body content entirely.
+        abs_end = len(lines)
+        for t in range(abs_start + 1, len(lines)):
+            hm = re.match(r"^(#{1,6})\s+", lines[t].strip())
+            if hm and len(hm.group(1)) <= abs_level:
+                abs_end = t
+                break
+        del lines[abs_start:abs_end]
+
+    body = "\n".join(lines).strip() + "\n"
+    return title, abstract, body
+
+
+def _escape_latex_text(value: str) -> str:
+    escaped = value.replace("\\", r"\textbackslash{}")
+    escaped = escaped.replace("{", r"\{").replace("}", r"\}")
+    escaped = escaped.replace("_", r"\_")
+    escaped = escaped.replace("%", r"\%")
+    escaped = escaped.replace("&", r"\&")
+    escaped = escaped.replace("#", r"\#")
+    escaped = escaped.replace("$", r"\$")
+    return escaped
+
+
+def _enforce_latex_title_abstract_and_hierarchy(
+    latex: str,
+    markdown_text: str,
+    title: str | None,
+    abstract: str | None,
+) -> str:
+    """Ensure title/abstract exist in TeX and heading hierarchy reflects markdown."""
+    final_title = title or "Large Language Models for Automated Academic Survey Generation: A State of the Art Review"
+
+    # Ensure title command exists.
+    if "\\title{" not in latex:
+        title_cmd = f"\\title{{{_escape_latex_text(final_title)}}}\n"
+        if "\\author{" in latex:
+            latex = latex.replace("\\author{", title_cmd + "\\author{", 1)
+        elif "\\begin{document}" in latex:
+            latex = latex.replace("\\begin{document}", title_cmd + "\\begin{document}", 1)
+
+    # Ensure \maketitle is present.
+    if "\\maketitle" not in latex and "\\begin{document}" in latex:
+        latex = latex.replace("\\begin{document}", "\\begin{document}\n\\maketitle", 1)
+
+    # Normalize abstract block.
+    if "\\begin{abstract}" not in latex:
+        latex = latex.replace("\\end{abstract}", "")
+        if abstract:
+            abs_body = _escape_latex_text(abstract)
+            abs_block = f"\\begin{{abstract}}\n{abs_body}\n\\end{{abstract}}\n"
+            if "\\maketitle" in latex:
+                latex = latex.replace("\\maketitle", "\\maketitle\n" + abs_block, 1)
+            elif "\\begin{document}" in latex:
+                latex = latex.replace("\\begin{document}", "\\begin{document}\n" + abs_block, 1)
+
+    # Enforce hierarchy: markdown H3 headings should become \subsection in TeX.
+    h3_titles: list[str] = []
+    for ln in markdown_text.splitlines():
+        m = re.match(r"^###\s+(.+?)\s*$", ln)
+        if m:
+            h3_titles.append(m.group(1).strip())
+
+    for h3 in h3_titles:
+        pattern = r"\\section\{" + re.escape(h3) + r"\}"
+        latex = re.sub(pattern, r"\\subsection{" + h3 + "}", latex)
+
+    return latex
+
+
+def _strip_yaml_front_matter(markdown_text: str) -> str:
+    """Remove a leading YAML front matter block if present."""
+    text = markdown_text
+    while text.startswith("---\n"):
+        end_idx = text.find("\n---\n", 4)
+        if end_idx == -1:
+            break
+        text = text[end_idx + 5 :].lstrip()
+    return text
+
+
+def _inject_yaml_metadata(markdown_text: str, title: str | None, abstract: str | None) -> str:
+    """Prepend YAML metadata to drive professional LaTeX title/abstract rendering."""
+    if not title and not abstract:
+        return markdown_text
+
+    meta: list[str] = ["---"]
+    if title:
+        safe_title = title.replace('"', "\\\"")
+        meta.append(f'title: "{safe_title}"')
+    if abstract:
+        meta.append("abstract: |")
+        for line in abstract.splitlines():
+            meta.append(f"  {line.rstrip()}")
+    meta.append("---")
+    return "\n".join(meta) + "\n\n" + markdown_text.lstrip()
+
+
+def _derive_fallback_abstract(body_text: str) -> str:
+    """Derive a short abstract from the first content paragraph when needed."""
+    paragraphs = [p.strip() for p in re.split(r"\n\s*\n", body_text) if p.strip()]
+    for p in paragraphs:
+        if p.startswith("#"):
+            continue
+        words = p.split()
+        if len(words) >= 20:
+            return " ".join(words[:80])
+    return (
+        "This survey synthesizes the state of the art, covering methods, evaluation, "
+        "limitations, and future directions based on cited literature."
+    )
+
+
+def _normalize_heading_hierarchy(markdown_text: str) -> str:
+    """Normalize heading hierarchy generically for any survey topic.
+
+    Keeps relative structure while compressing arbitrary heading levels
+    into consecutive levels (e.g., 2/4/6 -> 1/2/3).
+    """
+    levels: list[int] = []
+    for ln in markdown_text.splitlines():
+        m = re.match(r"^(#{1,6})\s+", ln)
+        if m:
+            levels.append(len(m.group(1)))
+
+    if not levels:
+        return markdown_text.strip() + "\n"
+
+    unique_levels = sorted(set(levels))
+    level_map = {old: idx + 1 for idx, old in enumerate(unique_levels)}
+
+    out: list[str] = []
+    for ln in markdown_text.splitlines():
+        m = re.match(r"^(#{1,6})\s+(.+?)\s*$", ln)
+        if not m:
+            out.append(ln)
+            continue
+        raw_level = len(m.group(1))
+        heading_text = m.group(2).strip()
+        new_level = max(1, min(6, level_map.get(raw_level, raw_level)))
+        out.append(f"{'#' * new_level} {heading_text}")
+
+    return "\n".join(out).strip() + "\n"
+
+
+def _ensure_introduction_heading(markdown_text: str) -> str:
+    """Ensure an explicit Introduction section exists after Abstract."""
+    if re.search(r"(?mi)^#{1,3}\s+introduction\s*$", markdown_text):
+        return markdown_text
+
+    lines = markdown_text.splitlines()
+    abs_idx = -1
+    abs_level = 0
+    for i, ln in enumerate(lines):
+        m = re.match(r"^(#{1,6})\s+abstract\s*$", ln.strip(), flags=re.IGNORECASE)
+        if m:
+            abs_idx = i
+            abs_level = len(m.group(1))
+            break
+
+    if abs_idx < 0:
+        # Fallback: insert Introduction after title if no Abstract heading found.
+        title_idx = next((i for i, ln in enumerate(lines) if re.match(r"^#\s+", ln.strip())), None)
+        if title_idx is None:
+            return markdown_text
+        insert_at = title_idx + 1
+        while insert_at < len(lines) and not lines[insert_at].strip():
+            insert_at += 1
+        lines[insert_at:insert_at] = ["", "## Introduction", ""]
+        return "\n".join(lines).strip() + "\n"
+
+    # Find end of abstract content and insert Introduction immediately after it.
+    j = abs_idx + 1
+    while j < len(lines) and not lines[j].strip():
+        j += 1
+
+    # Consume abstract paragraph lines until next blank or heading of same/higher level.
+    while j < len(lines):
+        line = lines[j]
+        if not line.strip():
+            break
+        hm = re.match(r"^(#{1,6})\s+", line.strip())
+        if hm and len(hm.group(1)) <= abs_level:
+            break
+        j += 1
+
+    insert_at = j
+    lines[insert_at:insert_at] = ["", "## Introduction", ""]
+    return "\n".join(lines).strip() + "\n"
+
+
+def _remap_citation_ids(markdown_text: str, citation_map: dict[str, str]) -> str:
+    """Remap canonical citation IDs to source/bib IDs in markdown citation syntax."""
+    if not citation_map:
+        return markdown_text
+
+    def _map_id(cid: str) -> str:
+        return citation_map.get(cid, cid)
+
+    def _repl_bracket(match: re.Match[str]) -> str:
+        content = match.group(1)
+        remapped = re.sub(r"@([A-Za-z0-9_:\-.]+)", lambda m: "@" + _map_id(m.group(1)), content)
+        return "[" + remapped + "]"
+
+    text = re.sub(r"\[([^\]]+)\]", _repl_bracket, markdown_text)
+
+    text = re.sub(
+        r"\\cite\{([^}]+)\}",
+        lambda m: "\\cite{" + ",".join(_map_id(x.strip()) for x in m.group(1).split(",") if x.strip()) + "}",
+        text,
+    )
+
+    text = re.sub(r"(?<!\\w)@([A-Za-z0-9_:\-.]+)", lambda m: "@" + _map_id(m.group(1)), text)
+    return text
+
+
 def normalize_citations(markdown_text: str) -> str:
     """Normalize citation markers to Pandoc format for reliable citeproc."""
 
@@ -256,43 +600,69 @@ def _generate_year_distribution_figure(
     return output_fig_path, counts
 
 
-def _inject_figure_if_missing(markdown_text: str, extracted_dir: Path | None, markdown_dir: Path) -> str:
-    """Ensure markdown includes at least one concrete figure with a real asset path."""
-    has_figure = re.search(r"!\[[^\]]*\]\([^\)]+\)", markdown_text) is not None
-    if has_figure:
+
+
+
+
+def _strip_manual_references_section(markdown_text: str) -> str:
+    """Drop authored 'References' section so bibliography is produced from BibTeX once."""
+    m = re.search(r"(?mi)^#{1,3}\s+references\s*$", markdown_text)
+    if not m:
         return markdown_text
+    return markdown_text[:m.start()].rstrip() + "\n"
 
-    fig_path_abs = markdown_dir / "figures" / "publication_year_distribution.png"
-    fig_path, counts = _generate_year_distribution_figure(extracted_dir, fig_path_abs)
-    if fig_path is None:
-        return markdown_text
 
-    rel_path = fig_path.relative_to(markdown_dir).as_posix()
-    years = sorted(counts)
-    year_span = f"{years[0]}-{years[-1]}" if years else "unknown"
-    total = sum(counts.values())
+def _repair_unresolved_citation_placeholders(markdown_text: str) -> str:
+    """Remove unresolved placeholders like (???), [????], or bare ?????.
 
-    figure_block = (
-        "\n\n"
-        "## Visual Evidence\n\n"
-        f"![Publication year distribution across included studies (n={total}, years {year_span}).]"
-        f"({rel_path}){{#fig:year_distribution width=85%}}\n\n"
-        "Figure \\ref{fig:year_distribution} summarizes the temporal spread of the included corpus.\n"
-    )
+    If a paragraph already has at least one valid citation marker, placeholders are
+    replaced with that marker; otherwise placeholders are removed.
+    """
 
-    intro_match = re.search(r"(?mi)^##\s+Introduction\b.*$", markdown_text)
-    if intro_match:
-        insert_at = intro_match.end()
-        return markdown_text[:insert_at] + "\n" + figure_block + markdown_text[insert_at:]
-    return markdown_text + figure_block
+    def _first_citation_marker(paragraph: str) -> str | None:
+        m = re.search(r"\[@[^\]]+\]", paragraph)
+        if m:
+            return m.group(0)
+        return None
+
+    placeholder_re = re.compile(r"\(\?{2,}\)|\[\?{2,}\]|(?<![A-Za-z0-9_])\?{4,}(?![A-Za-z0-9_])")
+
+    parts = re.split(r"(\n\s*\n)", markdown_text)
+    repaired_parts: list[str] = []
+    for part in parts:
+        if not part or part.isspace() or re.fullmatch(r"\n\s*\n", part):
+            repaired_parts.append(part)
+            continue
+
+        marker = _first_citation_marker(part)
+        if marker:
+            repaired = placeholder_re.sub(marker, part)
+        else:
+            repaired = placeholder_re.sub("", part)
+
+        repaired = re.sub(r"\s{2,}", " ", repaired)
+        repaired_parts.append(repaired)
+
+    return "".join(repaired_parts)
 
 
 def preprocess_markdown(markdown_text: str, extracted_dir: Path | None, markdown_dir: Path) -> str:
     """Apply publication-focused normalization before Pandoc conversion."""
-    text = normalize_citations(markdown_text)
+    text = _strip_yaml_front_matter(markdown_text)
+
+    title, abstract, body = _extract_title_abstract_and_body(text)
+    if not title:
+        title = "Survey"
+    if not abstract:
+        abstract = _derive_fallback_abstract(body)
+
+    text = _normalize_heading_hierarchy(body)
+    text = normalize_citations(text)
     known_ids = _load_known_ids(extracted_dir)
     text = _autocite_bare_ids(text, known_ids)
-    text = _inject_figure_if_missing(text, extracted_dir, markdown_dir)
+    text = _repair_unresolved_citation_placeholders(text)
+    text = _strip_manual_references_section(text)
+    text = _inject_yaml_metadata(text, title=title, abstract=abstract)
     return text
 
 
@@ -301,7 +671,14 @@ def _safe_bib_id(value: str) -> str:
 
 
 def _bibtex_escape(value: str) -> str:
-    return value.replace("{", "\\{").replace("}", "\\}")
+    escaped = value.replace("\\", "\\textbackslash{}")
+    escaped = escaped.replace("{", "\\{").replace("}", "\\}")
+    escaped = escaped.replace("_", "\\_")
+    escaped = escaped.replace("%", "\\%")
+    escaped = escaped.replace("&", "\\&")
+    escaped = escaped.replace("#", "\\#")
+    escaped = escaped.replace("$", "\\$")
+    return escaped
 
 
 def _load_extracted_metadata(extracted_dir: Path) -> dict[str, dict[str, str]]:
@@ -389,6 +766,7 @@ def convert_markdown_to_latex(
     latex_path: Path,
     bibliography_path: Path | None = None,
     extracted_dir_for_auto_bib: Path | None = None,
+    citation_map_path: Path | None = None,
     ensure_pandoc: bool = False,
     standalone: bool = True,
 ) -> Path:
@@ -403,6 +781,8 @@ def convert_markdown_to_latex(
         extracted_dir=extracted_dir_for_auto_bib,
         markdown_dir=markdown_path.parent,
     )
+    citation_map = _load_citation_map(citation_map_path)
+    md = _remap_citation_ids(md, citation_map)
 
     # Keep canonical markdown synchronized with normalized/injected content.
     if md != raw_md:
@@ -414,7 +794,17 @@ def convert_markdown_to_latex(
         bib_text = build_bibtex(citation_ids, extracted_dir_for_auto_bib)
         # Keep bibliography path local and stable so BibTeX can resolve it reliably.
         bibliography_path = latex_path.parent / "refs.bib"
+        bibliography_path.parent.mkdir(parents=True, exist_ok=True)
         bibliography_path.write_text(bib_text, encoding="utf-8")
+
+    # Fallback: when cite extraction misses IDs, still provide a bibliography
+    # from extracted metadata so natbib has resolvable keys.
+    if bibliography_path is None and extracted_dir_for_auto_bib is not None:
+        meta = _load_extracted_metadata(extracted_dir_for_auto_bib)
+        if meta:
+            bibliography_path = latex_path.parent / "refs.bib"
+            bibliography_path.parent.mkdir(parents=True, exist_ok=True)
+            bibliography_path.write_text(build_bibtex(meta.keys(), extracted_dir_for_auto_bib), encoding="utf-8")
 
     args = [
         "--from=markdown+pipe_tables+grid_tables+table_captions+fenced_divs+raw_tex+tex_math_dollars+implicit_figures",
@@ -437,11 +827,27 @@ def convert_markdown_to_latex(
         "--variable=geometry:margin=1in",
         "--variable=fontsize:11pt",
         "--variable=linestretch:1.15",
-        "--metadata=title:State of the Art Review",
         "--metadata=author:SOA-CLI",
     ])
 
     latex = pypandoc.convert_text(md, to="latex", format="md", extra_args=args)
+
+    # Keep title/abstract explicit in TeX and align subsection levels with markdown.
+    title_meta, abstract_meta = _extract_title_and_abstract_metadata(md)
+    latex = _enforce_latex_title_abstract_and_hierarchy(latex, md, title_meta, abstract_meta)
+
+    # Keep bibliography reference stable for BibTeX by using local filename only.
+    if bibliography_path is not None:
+        bib_name = bibliography_path.with_suffix("").name
+        latex = re.sub(r"\\bibliography\{[^}]+\}", f"\\\\bibliography{{{bib_name}}}", latex)
+
+        # Pandoc can emit natbib cites without appending \bibliography in some templates.
+        if "\\bibliography{" not in latex:
+            bib_line = f"\\bibliography{{{bib_name}}}\n"
+            if "\\end{document}" in latex:
+                latex = latex.replace("\\end{document}", bib_line + "\\end{document}")
+            else:
+                latex += "\n" + bib_line
 
     latex_path.parent.mkdir(parents=True, exist_ok=True)
     latex_path.write_text(latex, encoding="utf-8")
@@ -459,6 +865,11 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Directory containing extracted paper json files for automatic bib generation",
     )
+    parser.add_argument(
+        "--citation-map",
+        default=None,
+        help="Optional JSON map from canonical IDs to source bib IDs",
+    )
     parser.add_argument("--ensure-pandoc", action="store_true", help="Download pandoc if missing")
     parser.add_argument("--standalone", action="store_true", help="Generate standalone latex document")
     return parser.parse_args()
@@ -471,6 +882,7 @@ def main() -> None:
     out_path = Path(args.output)
     bib_path = Path(args.bibliography) if args.bibliography else None
     extracted_dir = Path(args.auto_bib_from_extracted) if args.auto_bib_from_extracted else None
+    citation_map_path = Path(args.citation_map) if args.citation_map else None
 
     try:
         latex_path = convert_markdown_to_latex(
@@ -478,6 +890,7 @@ def main() -> None:
             latex_path=out_path,
             bibliography_path=bib_path,
             extracted_dir_for_auto_bib=extracted_dir,
+            citation_map_path=citation_map_path,
             ensure_pandoc=args.ensure_pandoc,
             standalone=args.standalone,
         )

@@ -22,9 +22,21 @@ def run_rubric_evaluator(state: dict[str, Any], llm_caller: RubricCall | None = 
     """
     print("\n[Node: Rubric Evaluator]")
 
-    draft_path = Path("artifacts/soa/state_of_the_art.md")
+    storage_mode = (state.get("storage_mode") or "db")
+    if isinstance(storage_mode, str):
+        mode = storage_mode.strip().lower()
+    else:
+        mode = "db"
+    soa_dir = Path("db_outputs/soa") if mode not in {"legacy", "hybrid", "files", "artifact", "artifacts"} else Path("artifacts/soa")
+    alt_soa_dir = Path("artifacts/soa") if soa_dir != Path("artifacts/soa") else Path("db_outputs/soa")
+
+    draft_path = soa_dir / "state_of_the_art.md"
     if not draft_path.exists():
-        draft_path = Path("artifacts/soa/state_of_the_art.tex")
+        draft_path = alt_soa_dir / "state_of_the_art.md"
+    if not draft_path.exists():
+        draft_path = soa_dir / "state_of_the_art.tex"
+    if not draft_path.exists():
+        draft_path = alt_soa_dir / "state_of_the_art.tex"
     if not draft_path.exists():
         fallback = state.get("soa_draft") or ""
         if not fallback:
@@ -63,7 +75,7 @@ def run_rubric_evaluator(state: dict[str, Any], llm_caller: RubricCall | None = 
         ],
     }
 
-    output_path = "artifacts/soa/rubric_report.json"
+    output_path = str(soa_dir / "rubric_report.json")
 
     try:
         raw = llm_caller(

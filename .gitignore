@@ -61,6 +61,8 @@ artifacts/states/*.json
 artifacts/benchmark/*.json
 artifacts/benchmark/prompts/*.txt
 
+db_outputs/
+
 
 
 # Vector database (generated)

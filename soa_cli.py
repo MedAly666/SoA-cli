@@ -212,6 +212,8 @@ def create_initial_state(
         "synthesis": None,
         "synthesis_paper_coverage": 0.0,
         "soa_draft": None,
+        "citation_map": {},
+        "db_run_id": "",
         "prisma_metadata": prisma_metadata,
         "citation_graph": None,
 
@@ -446,10 +448,21 @@ def run_pipeline(
         print(f"\n[Export] Generating output in '{output_format}' format...")
         
         exporter = SOAExporter()
-        output_dir = "artifacts/soa"
+        storage_mode = os.getenv("SOA_STORAGE_MODE", "db").strip().lower()
+        output_dir = "db_outputs/soa" if storage_mode not in {"legacy", "hybrid", "files", "artifact", "artifacts"} else "artifacts/soa"
+        fallback_output_dir = "artifacts/soa" if output_dir != "artifacts/soa" else "db_outputs/soa"
         base_name = "state_of_the_art"
         markdown_path = Path(output_dir) / "state_of_the_art.md"
         latex_path = Path(output_dir) / "state_of_the_art.tex"
+
+        if not markdown_path.exists():
+            alt = Path(fallback_output_dir) / "state_of_the_art.md"
+            if alt.exists():
+                markdown_path = alt
+        if not latex_path.exists():
+            alt = Path(fallback_output_dir) / "state_of_the_art.tex"
+            if alt.exists():
+                latex_path = alt
         
         if output_format == "all":
             # Export markdown from canonical markdown artifact if present.
@@ -466,7 +479,7 @@ def run_pipeline(
                 shutil.copy2(latex_path, "state_of_the_art.tex")
                 print(f"✓ LaTeX: state_of_the_art.tex")
             else:
-                print("! LaTeX artifact not found at artifacts/soa/state_of_the_art.tex")
+                print(f"! LaTeX artifact not found at {output_dir}/state_of_the_art.tex")
 
             # Keep docx conversion path from exporter (expects latex-like content, best effort).
             try:
@@ -482,7 +495,7 @@ def run_pipeline(
                 shutil.copy2(latex_path, "state_of_the_art.tex")
                 print(f"✓ LaTeX: state_of_the_art.tex")
             else:
-                print("! LaTeX artifact not found at artifacts/soa/state_of_the_art.tex")
+                print(f"! LaTeX artifact not found at {output_dir}/state_of_the_art.tex")
             
         elif output_format == "markdown":
             # Markdown only

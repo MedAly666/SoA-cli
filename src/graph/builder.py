@@ -21,6 +21,7 @@ from .nodes import (
     verifier_node,
     repair_node,
     final_output_node,
+    figures_generator_node,
 )
 
 
@@ -132,6 +133,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("verifier", verifier_node)
     workflow.add_node("repair", repair_node)
     workflow.add_node("final_output", final_output_node)
+    workflow.add_node("figures_generator", figures_generator_node)
     
     # Linear edges (deterministic flow)
     workflow.set_entry_point("theme_builder")
@@ -169,7 +171,8 @@ def build_graph() -> StateGraph:
     
     # Repair loops back to verifier
     workflow.add_edge("repair", "verifier")
-    workflow.add_edge("final_output", END)
+    workflow.add_edge("final_output", "figures_generator")
+    workflow.add_edge("figures_generator", END)
     
     return workflow
 

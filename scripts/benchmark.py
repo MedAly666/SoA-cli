@@ -141,9 +141,35 @@ BENCHMARK_DIR = ROOT / "artifacts" / "benchmark"
 PROMPT_DIR = BENCHMARK_DIR / "prompts"
 _HSR_EMBED_MODEL: Any | None = None
 
+DEFAULT_THRESHOLDS: dict[str, float] = {
+    "tri_judge_score": 85.0,
+    "citation_f1": 0.70,
+    "hsr": 0.90,
+    "min_checked_claims": 5.0,
+}
+
 
 def warn(msg: str) -> None:
     print(f"[benchmark][warn] {msg}")
+
+
+def load_thresholds() -> dict[str, float]:
+    thresholds = dict(DEFAULT_THRESHOLDS)
+    path = BENCHMARK_DIR / "thresholds.json"
+    if not path.exists():
+        return thresholds
+    try:
+        obj = json.loads(path.read_text(encoding="utf-8"))
+    except Exception as exc:
+        warn(f"Failed to parse thresholds file {path}: {exc}")
+        return thresholds
+    if not isinstance(obj, dict):
+        return thresholds
+    for key in ("tri_judge_score", "citation_f1", "hsr", "min_checked_claims"):
+        val = safe_float(obj.get(key))
+        if val is not None:
+            thresholds[key] = val
+    return thresholds
 
 
 def load_json(path: Path) -> Optional[dict[str, Any]]:
@@ -186,6 +212,8 @@ def run_pipeline_subprocess(command: list[str]) -> dict[str, Any]:
 def get_final_tex_path() -> Optional[Path]:
     # First try canonical high-priority paths in deterministic order.
     direct_candidates = [
+        ROOT / "db_outputs" / "soa" / "state_of_the_art_final.tex",
+        ROOT / "db_outputs" / "soa" / "state_of_the_art.tex",
         ROOT / "artifacts" / "soa" / "state_of_the_art_final.tex",
         ROOT / "artifacts" / "soa" / "state_of_the_art.tex",
         ROOT / "state_of_the_art.tex",
@@ -200,6 +228,7 @@ def get_final_tex_path() -> Optional[Path]:
     fallback: list[Path] = []
     for pattern in (
         ROOT.glob("state_of_the_art*.tex"),
+        (ROOT / "db_outputs" / "soa").glob("*.tex"),
         (ROOT / "artifacts").glob("*.tex"),
         (ROOT / "artifacts" / "soa").glob("*.tex"),
     ):
@@ -650,8 +679,16 @@ def metric_hallucination(report_path: Path) -> tuple[Optional[float], Optional[b
         warn("M7 skipped: hallucination report missing/invalid")
         return None, None, None, None
 
-    violations = report.get("violations", [])
-    total_violations = len(violations) if isinstance(violations, list) else 0
+    violations_obj = report.get("violations", [])
+    details = report.get("details", [])
+    if isinstance(details, list):
+        total_violations = len(details)
+    elif isinstance(violations_obj, list):
+        total_violations = len(violations_obj)
+    elif isinstance(violations_obj, dict):
+        total_violations = int(report.get("total_violations", 0) or 0)
+    else:
+        total_violations = int(report.get("total_violations", 0) or 0)
     try:
         total_claims_checked = int(report.get("total_claims_checked", 0) or 0)
     except Exception:
@@ -662,7 +699,8 @@ def metric_hallucination(report_path: Path) -> tuple[Optional[float], Optional[b
         total_claims_all = 0
 
     # Prefer checked claims when sample size is meaningful; otherwise fall back.
-    total_claims = total_claims_checked if total_claims_checked >= 5 else total_claims_all
+    min_checked_claims = int(report.get("min_checked_claims_required", 5) or 5)
+    total_claims = total_claims_checked if total_claims_checked >= min_checked_claims else total_claims_all
     try:
         total_claims_num = int(total_claims)
     except Exception:
@@ -825,6 +863,23 @@ def print_console_report(
         f"SoA-CLI        {fmt(results.get('sam_r')):>5}  {fmt(results.get('sam_o')):>5}   {fmt(results.get('sam_c')):>5}"
     )
     print()
+    threshold_results = results.get("threshold_results") or {}
+    failed = results.get("failed_threshold_metrics") or []
+    if isinstance(threshold_results, dict) and threshold_results:
+        print("THRESHOLD GATES")
+        for metric_name, payload in threshold_results.items():
+            if not isinstance(payload, dict):
+                continue
+            required = payload.get("required")
+            actual = payload.get("actual")
+            passed = bool(payload.get("passed"))
+            print(
+                f"- {metric_name}: actual={actual} required={required} -> "
+                f"{'PASS' if passed else 'FAIL'}"
+            )
+        print(f"Overall threshold status: {'PASS' if not failed else 'FAIL'}")
+        print()
+
     print(f"Note: \"—\" means the system did not report this metric.")
     print(f"      SoA-CLI results on {paper_count} papers, topic: {topic}.")
     print()
@@ -863,17 +918,46 @@ def evaluate_all_metrics(
     rouge_l = metric_rouge_l(final_tex, extracted_dir)
     hsr = metric_hsr(contract if isinstance(contract, dict) else None, final_tex)
 
-    hallucination_rate, repair_triggered, total_violations, total_claims = metric_hallucination(
-        ROOT / "artifacts" / "soa" / "hallucination_report.json"
-    )
+    hallu_report_path = ROOT / "db_outputs" / "soa" / "hallucination_report.json"
+    if not hallu_report_path.exists():
+        hallu_report_path = ROOT / "artifacts" / "soa" / "hallucination_report.json"
+
+    hallucination_rate, repair_triggered, total_violations, total_claims = metric_hallucination(hallu_report_path)
     if hallucination_rate is None:
-        missing.append("artifacts/soa/hallucination_report.json")
+        missing.append("db_outputs/soa/hallucination_report.json or artifacts/soa/hallucination_report.json")
 
     token_count, estimated_cost = estimate_tokens_and_cost(final_tex_path, extracted_dir)
     if token_count is None:
         missing.append("token proxy inputs (final tex + extracted json)")
 
     stage_timing = gather_stage_timings(pipeline_started_at)
+    thresholds = load_thresholds()
+
+    threshold_results = {
+        "tri_judge_score": {
+            "required": thresholds["tri_judge_score"],
+            "actual": tri_judge_score,
+            "passed": tri_judge_score is not None and tri_judge_score >= thresholds["tri_judge_score"],
+        },
+        "citation_f1": {
+            "required": thresholds["citation_f1"],
+            "actual": citation_f1,
+            "passed": citation_f1 is not None and citation_f1 >= thresholds["citation_f1"],
+        },
+        "hsr": {
+            "required": thresholds["hsr"],
+            "actual": hsr,
+            "passed": hsr is not None and hsr >= thresholds["hsr"],
+        },
+        "min_checked_claims": {
+            "required": int(thresholds["min_checked_claims"]),
+            "actual": total_claims,
+            "passed": (total_claims or 0) >= int(thresholds["min_checked_claims"]),
+        },
+    }
+
+    failed_metrics = [k for k, v in threshold_results.items() if not bool(v.get("passed"))]
+    benchmark_passed = len(failed_metrics) == 0
 
     soa_results: dict[str, Any] = {
         "tri_judge_score": tri_judge_score,
@@ -897,6 +981,10 @@ def evaluate_all_metrics(
         "token_count_proxy": token_count,
         "agent_count": 11,
         "stage_timing": stage_timing,
+        "thresholds": thresholds,
+        "threshold_results": threshold_results,
+        "failed_threshold_metrics": failed_metrics,
+        "benchmark_passed": benchmark_passed,
         "cost_note": "Estimated using cl100k_base tokenization and fixed rate $0.001 per 1K tokens.",
         "hallucination_note": "SoA-CLI exclusive advantage metric.",
     }

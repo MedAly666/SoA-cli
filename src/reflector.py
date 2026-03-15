@@ -35,11 +35,23 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
         # Lazy import to avoid module cycles when used outside nodes.py
         from src.graph.nodes import call_llm as llm_caller  # type: ignore
 
+    storage_mode = (state.get("storage_mode") or "db")
+    if isinstance(storage_mode, str):
+        mode = storage_mode.strip().lower()
+    else:
+        mode = "db"
+    soa_dir = Path("db_outputs/soa") if mode not in {"legacy", "hybrid", "files", "artifact", "artifacts"} else Path("artifacts/soa")
+    alt_soa_dir = Path("artifacts/soa") if soa_dir != Path("artifacts/soa") else Path("db_outputs/soa")
+
     draft = state.get("soa_draft")
     if not draft:
-        draft_path = Path("artifacts/soa/state_of_the_art.md")
+        draft_path = soa_dir / "state_of_the_art.md"
         if not draft_path.exists():
-            draft_path = Path("artifacts/soa/state_of_the_art.tex")
+            draft_path = alt_soa_dir / "state_of_the_art.md"
+        if not draft_path.exists():
+            draft_path = soa_dir / "state_of_the_art.tex"
+        if not draft_path.exists():
+            draft_path = alt_soa_dir / "state_of_the_art.tex"
         if draft_path.exists():
             draft = draft_path.read_text(encoding="utf-8", errors="ignore")
 
@@ -68,7 +80,7 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
     l1_pass, l1_data, l1_err = _call_level(
         "L1",
         "prompts/reflector_L1.system.txt",
-        "artifacts/soa/reflector_L1.json",
+        str(soa_dir / "reflector_L1.json"),
         base_payload,
         llm_caller,
     )
@@ -85,8 +97,8 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
             "instruction": "Fix outline and section-theme alignment before deeper edits.",
         }
 
-        Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
-        with open("artifacts/soa/reflector_feedback.json", "w", encoding="utf-8") as f:
+        soa_dir.mkdir(parents=True, exist_ok=True)
+        with open(soa_dir / "reflector_feedback.json", "w", encoding="utf-8") as f:
             json.dump(feedback, f, indent=2)
 
         return {
@@ -101,7 +113,7 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
     l2_pass, l2_data, l2_err = _call_level(
         "L2",
         "prompts/reflector_L2.system.txt",
-        "artifacts/soa/reflector_L2.json",
+        str(soa_dir / "reflector_L2.json"),
         base_payload,
         llm_caller,
     )
@@ -118,8 +130,8 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
             "instruction": "Fix section argument arcs (claim -> evidence -> synthesis).",
         }
 
-        Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
-        with open("artifacts/soa/reflector_feedback.json", "w", encoding="utf-8") as f:
+        soa_dir.mkdir(parents=True, exist_ok=True)
+        with open(soa_dir / "reflector_feedback.json", "w", encoding="utf-8") as f:
             json.dump(feedback, f, indent=2)
 
         return {
@@ -134,7 +146,7 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
     l3_pass, l3_data, l3_err = _call_level(
         "L3",
         "prompts/reflector_L3.system.txt",
-        "artifacts/soa/reflector_L3.json",
+        str(soa_dir / "reflector_L3.json"),
         base_payload,
         llm_caller,
     )
@@ -170,8 +182,8 @@ def run_reflector(state: dict[str, Any], llm_caller: ReflectorCall | None = None
         "instruction": "No reflector correction needed.",
     }
 
-    Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
-    with open("artifacts/soa/reflector_feedback.json", "w", encoding="utf-8") as f:
+    soa_dir.mkdir(parents=True, exist_ok=True)
+    with open(soa_dir / "reflector_feedback.json", "w", encoding="utf-8") as f:
         json.dump(feedback, f, indent=2)
 
     return {

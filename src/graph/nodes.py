@@ -13,6 +13,7 @@ import json  # Keep for LLM prompt formatting
 import re
 import time
 import subprocess
+import textwrap
 from datetime import datetime
 from functools import wraps
 from pathlib import Path
@@ -34,6 +35,9 @@ from similarity_cluster import run_similarity_clustering
 from citation_graph import build_citation_graph, get_grounding_context
 from reflector import run_reflector
 from rubric_evaluator import run_rubric_evaluator
+from storage import PostgresStore, CitationMapEntry
+from storage.blob_store import BlobStore
+from src.llm_client import LLMClient
 
 # Import semantic PDF parser
 try:
@@ -86,12 +90,247 @@ def _write_json(path: str, payload: dict) -> None:
         json.dump(payload, f, indent=2)
 
 
+def _soa_output_dir() -> Path:
+    """Resolve SoA output directory for storage mode.
+
+    Set `SOA_STORAGE_MODE=db` to avoid writing SoA outputs into `artifacts/soa`.
+    """
+    mode = os.getenv("SOA_STORAGE_MODE", "db").strip().lower()
+    if mode in {"legacy", "hybrid", "files", "artifact", "artifacts"}:
+        return Path("artifacts/soa")
+    return Path("db_outputs/soa")
+
+
 def _count_citations_in_text(text: str) -> int:
     """Count citations in either pandoc markdown or LaTeX citation forms."""
     latex_count = len(re.findall(r'\\cite\{[^}]+\}', text))
     md_count = len(re.findall(r'\[@[^\]]+\]', text))
     md_inline_count = len(re.findall(r'(?<!\w)@[A-Za-z0-9_:\-.]+', text))
     return max(latex_count, md_count + md_inline_count)
+
+
+def _count_headings_in_markdown(text: str) -> int:
+    return len(re.findall(r'(?m)^#{1,3}\s+', text))
+
+
+def _count_unknown_placeholders(text: str) -> int:
+    """Count unresolved citation placeholders like (???), [????], or bare ?????."""
+    patterns = [
+        r"\(\?{2,}\)",
+        r"\[\?{2,}\]",
+        r"(?<![A-Za-z0-9_])\?{4,}(?![A-Za-z0-9_])",
+    ]
+    return sum(len(re.findall(pat, text)) for pat in patterns)
+
+
+def _extract_markdown_citation_ids(text: str) -> set[str]:
+    ids: set[str] = set()
+    for bracket in re.findall(r"\[([^\]]+)\]", text):
+        for cid in re.findall(r"@([A-Za-z0-9_:\-.]+)", bracket):
+            if not cid.startswith(("fig:", "tbl:", "tab:", "eq:", "sec:")):
+                ids.add(cid)
+    for cid in re.findall(r"(?<!\w)@([A-Za-z0-9_:\-.]+)", text):
+        if not cid.startswith(("fig:", "tbl:", "tab:", "eq:", "sec:")):
+            ids.add(cid)
+    return ids
+
+
+def _validate_writer_output(markdown_text: str, allowed_ids: set[str]) -> tuple[bool, list[str], dict[str, int]]:
+    reasons: list[str] = []
+    headings = _count_headings_in_markdown(markdown_text)
+    if headings < 6:
+        reasons.append(f"INSUFFICIENT_HEADINGS:{headings}")
+
+    paragraphs = [p for p in re.split(r"\n\s*\n", markdown_text) if p.strip()]
+    cited_paragraphs = [p for p in paragraphs if _count_citations_in_text(p) > 0]
+    ratio = (len(cited_paragraphs) / len(paragraphs)) if paragraphs else 0.0
+    if ratio < 0.60:
+        reasons.append(f"LOW_CITATION_DENSITY:{ratio:.2f}")
+
+    used_ids = _extract_markdown_citation_ids(markdown_text)
+    invalid_ids = sorted([cid for cid in used_ids if cid not in allowed_ids])
+    if invalid_ids:
+        reasons.append("INVALID_CITATION_KEYS")
+
+    unknown_placeholders = _count_unknown_placeholders(markdown_text)
+    if unknown_placeholders > 0:
+        reasons.append(f"UNRESOLVED_CITATION_PLACEHOLDERS:{unknown_placeholders}")
+
+    stats = {
+        "headings": headings,
+        "paragraphs": len(paragraphs),
+        "cited_paragraphs": len(cited_paragraphs),
+        "invalid_ids": len(invalid_ids),
+        "unknown_placeholders": unknown_placeholders,
+    }
+    return len(reasons) == 0, invalid_ids, stats
+
+
+def _extract_ascii_figure_specs(markdown_text: str) -> list[dict[str, str]]:
+    """Parse injected ASCII figure specification blocks from markdown."""
+    pattern = re.compile(
+        r"<!--\s*ASCII_FIGURE_SPEC:(?P<fid>[^\s>]+)\s*-->\s*"
+        r"\*\*Figure Spec \([^\)]*\)\*\*:\s*(?P<caption>.*?)\n\s*"
+        r"```text\n(?P<ascii>.*?)\n```\s*\n"
+        r"Brief explanation:\s*(?P<explanation>.*?)\n",
+        flags=re.DOTALL,
+    )
+    specs: list[dict[str, str]] = []
+    for match in pattern.finditer(markdown_text):
+        specs.append({
+            "figure_id": match.group("fid").strip(),
+            "caption": match.group("caption").strip(),
+            "ascii_art": match.group("ascii").strip(),
+            "explanation": match.group("explanation").strip(),
+        })
+    return specs
+
+
+def _fallback_tikz(spec: dict[str, str]) -> str:
+    """Deterministic fallback TikZ when LLM generation fails."""
+    lines = [ln.rstrip() for ln in spec.get("ascii_art", "").splitlines() if ln.strip()]
+    if not lines:
+        lines = ["(empty figure spec)"]
+
+    y = 0.0
+    nodes: list[str] = []
+    for idx, ln in enumerate(lines[:14], start=1):
+        escaped = ln.replace("\\", "\\textbackslash{}").replace("_", "\\_").replace("%", "\\%")
+        nodes.append(f"\\node[anchor=west,font=\\ttfamily\\small] (l{idx}) at (0,{y:.2f}) {{{escaped}}};")
+        y -= 0.55
+
+    frame_height = max(1.0, abs(y) + 0.4)
+    return "\n".join([
+        "\\begin{tikzpicture}",
+        "  \\draw[rounded corners=2pt, gray!50] (-0.3,0.4) rectangle (12.0,-" + f"{frame_height:.2f}" + ");",
+        "  " + "\n  ".join(nodes),
+        "\\end{tikzpicture}",
+    ])
+
+
+def _generate_tikz_from_spec(spec: dict[str, str], output_dir: Path) -> str:
+    """Generate TikZ from figure spec using an LLM with deterministic fallback."""
+    prompt_path = Path("prompts/figures_generator.system.txt")
+    if not prompt_path.exists():
+        return _fallback_tikz(spec)
+
+    try:
+        system_prompt = prompt_path.read_text(encoding="utf-8")
+        user_prompt = json.dumps(spec, indent=2)
+        client = LLMClient(timeout=int(os.getenv("LLM_TIMEOUT", "120")))
+        raw = client.call(system_prompt, user_prompt)
+        if raw.startswith("__LLM_FAILURE__"):
+            raise RuntimeError(raw)
+
+        # Strip markdown code fences if present.
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```[a-zA-Z]*\n", "", cleaned)
+            cleaned = re.sub(r"\n```$", "", cleaned).strip()
+
+        if "\\begin{tikzpicture}" not in cleaned or "\\end{tikzpicture}" not in cleaned:
+            raise ValueError("TikZ output missing tikzpicture environment")
+
+        # Normalize a frequent invalid key emitted by LLMs.
+        cleaned = re.sub(r"\brounded rectangle\b", "rectangle, rounded corners=2pt", cleaned)
+        return cleaned
+    except Exception as exc:
+        warn_path = output_dir / "_figures_generator_warnings.log"
+        warn_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(warn_path, "a", encoding="utf-8") as f:
+            f.write(f"{spec.get('figure_id')}: {exc}\n")
+        return _fallback_tikz(spec)
+
+
+def _ensure_tikz_packages(tex_text: str) -> str:
+    """Ensure TikZ packages are available in generated LaTeX preamble."""
+    # Remove any previously injected lines so we can reinsert with stable ordering.
+    tex_text = re.sub(r"(?m)^\\usepackage\{tikz\}\s*$\n?", "", tex_text)
+    tex_text = re.sub(r"(?m)^\\usetikzlibrary\{[^\n]*\}\s*$\n?", "", tex_text)
+
+    block = "\\usepackage{tikz}\n\\usetikzlibrary{arrows.meta,positioning,shapes.geometric,shapes.misc,fit,calc}"
+    marker = "\\usepackage{graphicx}"
+    if marker in tex_text:
+        return tex_text.replace(marker, marker + "\n" + block, 1)
+    return block + "\n" + tex_text
+
+
+def _replace_ascii_blocks_with_tikz(tex_text: str, specs: list[dict[str, str]], output_dir: Path) -> str:
+    """Replace ASCII figure spec rendered blocks in TeX with generated TikZ figures."""
+    updated = _ensure_tikz_packages(tex_text)
+
+    generic_block_pattern = re.compile(
+        r"\\textbf\{Figure Spec \(fig:[^\)]*\)\}:.*?"
+        r"\\texttt\{\\textbackslash\{\}label\\\{fig:[^\}]+\\\}\}\.\n*",
+        flags=re.DOTALL,
+    )
+
+    for spec in specs:
+        fig_id = spec["figure_id"]
+        tikz_code = _generate_tikz_from_spec(spec, output_dir)
+        label = fig_id
+        caption = spec.get("caption", "Generated figure")
+
+        figure_env = textwrap.dedent(
+            f"""
+            \\begin{{figure}}[htbp]
+            \\centering
+            {tikz_code}
+            \\caption{{{caption}}}
+            \\label{{{label}}}
+            \\end{{figure}}
+            """
+        ).strip()
+
+        # Replace one rendered Figure Spec block at a time in document order.
+        if generic_block_pattern.search(updated):
+            updated = generic_block_pattern.sub(lambda _m: figure_env + "\n", updated, count=1)
+            continue
+
+        # Fallback: insert figure near section heading if exact block pattern changes.
+        heading_guess = "Human-AI Collaboration Workflows" if "human" in fig_id else ""
+        if heading_guess and heading_guess in updated and figure_env not in updated:
+            updated = updated.replace(heading_guess, heading_guess + "\n\n" + figure_env, 1)
+
+    return updated
+
+
+def _prepare_citation_map(extracted_dir: Path, soa_dir: Path) -> tuple[dict[str, str], dict[str, str], list[str]]:
+    """Create canonical citation IDs and persist map locally + in PostgreSQL."""
+    store = PostgresStore()
+    if store.enabled and os.getenv("SOA_DB_AUTO_INIT", "true").lower() == "true":
+        try:
+            store.init_schema(Path("db/schema.sql"))
+        except Exception as e:
+            print(f"[DB] Warning: schema initialization failed ({e})")
+
+    entries = store.sync_papers_and_aliases(extracted_dir)
+
+    # Fallback when DB is disabled: still generate deterministic canonical IDs.
+    if not entries:
+        for idx, fp in enumerate(sorted(extracted_dir.glob("*.json")), start=1):
+            try:
+                obj = json.loads(fp.read_text(encoding="utf-8"))
+            except Exception:
+                obj = {}
+            source_id = str(obj.get("paper_id") or fp.stem)
+            title = str(obj.get("title") or source_id)
+            year_raw = obj.get("year")
+            year: int | None = None
+            if year_raw is not None and str(year_raw).isdigit():
+                year = int(str(year_raw))
+            entries.append(CitationMapEntry(
+                canonical_id=f"P{idx:03d}",
+                source_paper_id=source_id,
+                title=title,
+                year=year,
+            ))
+
+    map_payload = store.save_citation_map(entries, soa_dir / "citation_map.json")
+    canonical_to_source = dict(map_payload.get("canonical_to_source") or {})
+    source_to_canonical = dict(map_payload.get("source_to_canonical") or {})
+    canonical_ids = sorted(canonical_to_source.keys())
+    return canonical_to_source, source_to_canonical, canonical_ids
 
 
 def _with_timing(state: SOAState, result: dict, stage_name: str, started_at: float) -> dict:
@@ -1153,6 +1392,7 @@ def writer_node(state: SOAState) -> dict:
     prisma_metadata = state.get("prisma_metadata")
     citation_graph = state.get("citation_graph") or {"nodes": [], "edges": []}
     reflector_feedback = state.get("reflector_feedback") or {}
+    db_run_id_current = str(state.get("db_run_id") or "")
     
     # Check if synthesis exists
     if not synthesis:
@@ -1171,8 +1411,12 @@ def writer_node(state: SOAState) -> dict:
         agent_input = inject_contract(synthesis, contract)
 
         extracted_dir = Path("artifacts/extracted")
-        paper_ids = sorted([f.stem for f in extracted_dir.glob("*.json")])
+        soa_dir = _soa_output_dir()
+        soa_dir.mkdir(parents=True, exist_ok=True)
+
+        canonical_to_source, source_to_canonical, paper_ids = _prepare_citation_map(extracted_dir, soa_dir)
         paper_ids_str = "\n".join(f"  - {pid}" for pid in paper_ids) if paper_ids else "  - NO_PAPERS_FOUND"
+        allowed_ids = set(paper_ids)
 
         # Build paper reference sheet and numerical grounding context from extracted artifacts.
         reference_lines: list[str] = []
@@ -1187,6 +1431,7 @@ def writer_node(state: SOAState) -> dict:
                 continue
 
             pid = json_file.stem
+            canonical_pid = source_to_canonical.get(pid, source_to_canonical.get(str(pdata.get("paper_id", "")), pid))
             title = str(pdata.get("title", "Untitled")).strip()
             key_findings = pdata.get("key_findings", [])
             top_findings: list[str] = []
@@ -1197,19 +1442,20 @@ def writer_node(state: SOAState) -> dict:
                     if len(top_findings) >= 3:
                         break
             findings_part = "; ".join(top_findings) if top_findings else "No key findings available"
-            reference_lines.append(f"[{pid}]: {title} — {findings_part}")
+            reference_lines.append(f"[{canonical_pid}] ({pid}): {title} — {findings_part}")
 
             for field_name, field_value in pdata.items():
                 if isinstance(field_value, str):
                     if re.findall(unit_pattern, field_value):
-                        numerical_facts.append(f"[{pid}] {field_name}: {field_value[:200]}")
+                        numerical_facts.append(f"[{canonical_pid}] {field_name}: {field_value[:200]}")
                 elif isinstance(field_value, list):
                     for item in field_value[:3]:
                         if isinstance(item, str) and re.findall(unit_pattern, item):
-                            numerical_facts.append(f"[{pid}] {item[:200]}")
+                            numerical_facts.append(f"[{canonical_pid}] {item[:200]}")
 
         # Inject grounding materials into user prompt payload (serialized JSON user prompt).
         agent_input["paper_ids_list"] = paper_ids
+        agent_input["citation_map"] = canonical_to_source
         agent_input["paper_reference_sheet"] = (
             "PAPER REFERENCE SHEET\n" + "\n".join(reference_lines)
             if reference_lines else "PAPER REFERENCE SHEET\nNo extracted papers found."
@@ -1280,12 +1526,12 @@ def writer_node(state: SOAState) -> dict:
             print(f"  → Including PRISMA methodology ({prisma_metadata.get('total_papers', 0)} papers)")
         
         # Save input
-        input_path = "artifacts/soa/_writer_input.json"
-        _write_json(input_path, agent_input)
+        input_path = soa_dir / "_writer_input.json"
+        _write_json(str(input_path), agent_input)
         
         # Build runtime system prompt with paper IDs injected.
         writer_prompt_path = Path("prompts/writer.system.txt")
-        runtime_prompt_path = Path("artifacts/soa/_writer_runtime.system.txt")
+        runtime_prompt_path = soa_dir / "_writer_runtime.system.txt"
         try:
             system_prompt_text = writer_prompt_path.read_text(encoding="utf-8")
             system_prompt_text = system_prompt_text.replace("{PAPER_IDS_LIST}", paper_ids_str)
@@ -1299,10 +1545,10 @@ def writer_node(state: SOAState) -> dict:
         output_text = call_llm(
             str(runtime_prompt_path),
             agent_input,
-            "artifacts/soa/state_of_the_art_draft.md"  # Save draft markdown for debugging
+            str(soa_dir / "state_of_the_art_draft.md")  # Save draft markdown for debugging
         )
 
-        # Citation sanity check and single retry if zero citations.
+        # Citation sanity check and acceptance gates.
         citation_count_initial = _count_citations_in_text(output_text)
         if citation_count_initial == 0:
             print("[WRITER] zero citations detected, retrying with stricter instruction")
@@ -1322,14 +1568,40 @@ def writer_node(state: SOAState) -> dict:
             output_text = call_llm(
                 str(runtime_prompt_path),
                 retry_input,
-                "artifacts/soa/state_of_the_art_draft.md"
+                str(soa_dir / "state_of_the_art_draft.md")
             )
         else:
             writer_errors = []
 
+        valid, invalid_ids, quality_stats = _validate_writer_output(output_text, allowed_ids)
+        if not valid:
+            writer_errors.append({
+                "node": "writer",
+                "error": (
+                    f"WRITER_ACCEPTANCE_GATE_FAILED: invalid_ids={invalid_ids[:10]}, "
+                    f"stats={quality_stats}"
+                ),
+            })
+            retry_input = dict(agent_input)
+            retry_input["acceptance_gate_feedback"] = {
+                "invalid_citation_ids": invalid_ids,
+                "quality_stats": quality_stats,
+                "required_headings_min": 6,
+                "required_citation_density": 0.6,
+            }
+            output_text = call_llm(
+                str(runtime_prompt_path),
+                retry_input,
+                str(soa_dir / "state_of_the_art_draft.md"),
+            )
+
         # Save canonical markdown file for downstream evaluator nodes.
-        Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
-        with open("artifacts/soa/state_of_the_art.md", 'w', encoding='utf-8') as f:
+        state_of_the_art_md = soa_dir / "state_of_the_art.md"
+        state_of_the_art_tex = soa_dir / "state_of_the_art.tex"
+        state_of_the_art_final_tex = soa_dir / "state_of_the_art_final.tex"
+        citation_map_path = soa_dir / "citation_map.json"
+
+        with open(state_of_the_art_md, 'w', encoding='utf-8') as f:
             f.write(output_text)
 
         # Convert markdown output to LaTeX for validator/benchmark/tooling compatibility.
@@ -1338,9 +1610,10 @@ def writer_node(state: SOAState) -> dict:
             converter_cmd = [
                 sys.executable,
                 str(converter_script),
-                "--input", "artifacts/soa/state_of_the_art.md",
-                "--output", "artifacts/soa/state_of_the_art.tex",
+                "--input", str(state_of_the_art_md),
+                "--output", str(state_of_the_art_tex),
                 "--auto-bib-from-extracted", "artifacts/extracted",
+                "--citation-map", str(citation_map_path),
                 "--ensure-pandoc",
                 "--standalone",
             ]
@@ -1349,10 +1622,18 @@ def writer_node(state: SOAState) -> dict:
                 raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "markdown conversion failed")
 
             # Legacy final output sync for downstream tools expecting *_final.tex.
-            with open("artifacts/soa/state_of_the_art.tex", 'r', encoding='utf-8') as src_f:
+            with open(state_of_the_art_tex, 'r', encoding='utf-8') as src_f:
                 latex_text = src_f.read()
-            with open("artifacts/soa/state_of_the_art_final.tex", 'w', encoding='utf-8') as f:
+            with open(state_of_the_art_final_tex, 'w', encoding='utf-8') as f:
                 f.write(latex_text)
+
+            # Persist generated artifacts in PostgreSQL (if configured).
+            store = PostgresStore()
+            if store.enabled and not db_run_id_current:
+                db_run_id_current = store.ensure_run(topic=str(contract.get("global_theme", "")))
+            if store.enabled and db_run_id_current:
+                store.record_artifact(db_run_id_current, "soa_markdown", "markdown", str(state_of_the_art_md), output_text)
+                store.record_artifact(db_run_id_current, "soa_latex", "latex", str(state_of_the_art_tex), latex_text)
         except Exception as e:
             writer_errors.append({
                 "node": "writer",
@@ -1369,6 +1650,8 @@ def writer_node(state: SOAState) -> dict:
         
         return {
             "soa_draft": output_text,
+            "citation_map": canonical_to_source,
+            "db_run_id": db_run_id_current,
             "pipeline_stage": "writer_complete",
             "errors": writer_errors
         }
@@ -1433,6 +1716,7 @@ def verifier_node(state: SOAState) -> dict:
 
     verification_errors: list[dict] = []
     passed = False
+    min_checked_claims = 5
 
     try:
         from hallucination_detector import run_hallucination_checks, resolve_tex_path, count_cited_claims
@@ -1476,7 +1760,23 @@ def verifier_node(state: SOAState) -> dict:
                 "contradiction_check",
             ]
 
-        passed = report["total_violations"] == 0 and report["status"] in {"completed", "partial"}
+            if report["total_claims_checked"] < min_checked_claims:
+                report["status"] = "partial"
+                report["low_confidence"] = True
+                report["error"] = (
+                    f"Only {report['total_claims_checked']} cited claims checked; "
+                    f"minimum required is {min_checked_claims}."
+                )
+                report["repair_triggered"] = True
+            else:
+                report["low_confidence"] = False
+                report["error"] = report.get("error")
+
+        passed = (
+            report["total_violations"] == 0
+            and report["status"] == "completed"
+            and report["total_claims_checked"] >= min_checked_claims
+        )
 
     except Exception as e:
         report["status"] = "failed"
@@ -1490,8 +1790,9 @@ def verifier_node(state: SOAState) -> dict:
 
     finally:
         try:
-            Path("artifacts/soa").mkdir(parents=True, exist_ok=True)
-            with open("artifacts/soa/hallucination_report.json", "w", encoding="utf-8") as f:
+            soa_dir = _soa_output_dir()
+            soa_dir.mkdir(parents=True, exist_ok=True)
+            with open(soa_dir / "hallucination_report.json", "w", encoding="utf-8") as f:
                 json.dump(report, f, indent=2)
             print(
                 f"[VERIFIER] Report written: {report['total_violations']} violations "
@@ -1551,6 +1852,9 @@ def repair_node(state: SOAState) -> dict:
         }
     
     try:
+        soa_dir = _soa_output_dir()
+        soa_dir.mkdir(parents=True, exist_ok=True)
+
         print(f"  Repair iteration: {iteration + 1}")
         print(f"  Violations to fix: {len(violations)}")
         print(f"  Rubric failing dimensions: {', '.join(rubric_failing) if rubric_failing else 'None'}")
@@ -1559,20 +1863,41 @@ def repair_node(state: SOAState) -> dict:
             "soa_draft": soa_draft,
             "verification_results": violations,
             "rubric_failing": rubric_failing,
-            "extracted_paper_ids": sorted(list(extracted.keys())),
+            "extracted_paper_ids": sorted(list((state.get("citation_map") or {}).keys())) or sorted(list(extracted.keys())),
+            "citation_map": state.get("citation_map") or {},
             "repair_iteration": iteration + 1,
         }
 
-        _write_json("artifacts/soa/_repair_input.json", repair_input)
+        _write_json(str(soa_dir / "_repair_input.json"), repair_input)
 
         repaired_draft = call_llm(
             "prompts/repair.system.txt",
             repair_input,
-            "artifacts/soa/state_of_the_art_repaired.md"
+            str(soa_dir / "state_of_the_art_repaired.md")
         )
 
+        allowed_ids = set(repair_input["extracted_paper_ids"])
+        valid, invalid_ids, quality_stats = _validate_writer_output(repaired_draft, allowed_ids)
+        if not valid:
+            repair_input["acceptance_gate_feedback"] = {
+                "invalid_citation_ids": invalid_ids,
+                "quality_stats": quality_stats,
+                "required_headings_min": 6,
+                "required_citation_density": 0.6,
+            }
+            repaired_draft = call_llm(
+                "prompts/repair.system.txt",
+                repair_input,
+                str(soa_dir / "state_of_the_art_repaired.md")
+            )
+
         # Keep canonical markdown path in sync for downstream tooling.
-        with open("artifacts/soa/state_of_the_art.md", 'w', encoding='utf-8') as f:
+        state_of_the_art_md = soa_dir / "state_of_the_art.md"
+        state_of_the_art_tex = soa_dir / "state_of_the_art.tex"
+        state_of_the_art_final_tex = soa_dir / "state_of_the_art_final.tex"
+        citation_map_path = soa_dir / "citation_map.json"
+
+        with open(state_of_the_art_md, 'w', encoding='utf-8') as f:
             f.write(repaired_draft)
 
         # Re-generate LaTeX after repair.
@@ -1580,9 +1905,10 @@ def repair_node(state: SOAState) -> dict:
         converter_cmd = [
             sys.executable,
             str(converter_script),
-            "--input", "artifacts/soa/state_of_the_art.md",
-            "--output", "artifacts/soa/state_of_the_art.tex",
+            "--input", str(state_of_the_art_md),
+            "--output", str(state_of_the_art_tex),
             "--auto-bib-from-extracted", "artifacts/extracted",
+            "--citation-map", str(citation_map_path),
             "--ensure-pandoc",
             "--standalone",
         ]
@@ -1590,9 +1916,9 @@ def repair_node(state: SOAState) -> dict:
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or "markdown conversion failed during repair")
 
-        with open("artifacts/soa/state_of_the_art.tex", 'r', encoding='utf-8') as src_f:
+        with open(state_of_the_art_tex, 'r', encoding='utf-8') as src_f:
             latex_text = src_f.read()
-        with open("artifacts/soa/state_of_the_art_final.tex", 'w', encoding='utf-8') as f:
+        with open(state_of_the_art_final_tex, 'w', encoding='utf-8') as f:
             f.write(latex_text)
         
         print(f"  ✓ Repair complete")
@@ -1655,3 +1981,55 @@ def final_output_node(state: SOAState) -> dict:
         "pipeline_stage": "final_output_complete",
         "errors": [],
     }
+
+
+@record_timing("figures_generator")
+def figures_generator_node(state: SOAState) -> dict:
+    """Generate TikZ from ASCII figure specs and patch final TeX output."""
+    print("\n[Node: Figures Generator]")
+    errors: list[dict] = []
+
+    try:
+        soa_dir = _soa_output_dir()
+        md_path = soa_dir / "state_of_the_art.md"
+        tex_path = soa_dir / "state_of_the_art_final.tex"
+
+        if not md_path.exists() or not tex_path.exists():
+            msg = f"Skipping: required files missing (md={md_path.exists()}, tex={tex_path.exists()})"
+            print(f"  ⚠ {msg}")
+            return {
+                "pipeline_stage": "figures_generator_skipped",
+                "errors": [],
+            }
+
+        md_text = md_path.read_text(encoding="utf-8", errors="ignore")
+        specs = _extract_ascii_figure_specs(md_text)
+        if not specs:
+            print("  → No ASCII figure specs found")
+            return {
+                "pipeline_stage": "figures_generator_complete",
+                "errors": [],
+            }
+
+        tex_text = tex_path.read_text(encoding="utf-8", errors="ignore")
+        patched_tex = _replace_ascii_blocks_with_tikz(tex_text, specs, soa_dir)
+        tex_path.write_text(patched_tex, encoding="utf-8")
+
+        # Keep canonical state_of_the_art.tex in sync.
+        canonical_tex = soa_dir / "state_of_the_art.tex"
+        canonical_tex.write_text(patched_tex, encoding="utf-8")
+
+        print(f"  ✓ Replaced {len(specs)} ASCII figure block(s) with TikZ")
+
+        return {
+            "pipeline_stage": "figures_generator_complete",
+            "errors": [],
+        }
+
+    except Exception as e:
+        print(f"  ERROR: {e}")
+        errors.append({"node": "figures_generator", "error": str(e)})
+        return {
+            "pipeline_stage": "figures_generator_failed",
+            "errors": errors,
+        }

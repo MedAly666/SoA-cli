@@ -15,9 +15,16 @@ import numpy as np
 from pathlib import Path
 
 
+MIN_CHECKED_CLAIMS = 5
+
+
 def resolve_tex_path() -> Path:
     """Resolve SoA LaTeX path with fallback and explicit failure."""
-    tex_path = Path("artifacts/soa/state_of_the_art_final.tex")
+    tex_path = Path("db_outputs/soa/state_of_the_art_final.tex")
+    if not tex_path.exists():
+        tex_path = Path("db_outputs/soa/state_of_the_art.tex")
+    if not tex_path.exists():
+        tex_path = Path("artifacts/soa/state_of_the_art_final.tex")
     if not tex_path.exists():
         tex_path = Path("artifacts/soa/state_of_the_art.tex")
     if not tex_path.exists():
@@ -57,8 +64,30 @@ def split_into_claims(latex_text):
 
 
 def extract_citations(sentence):
-    """Extract paper IDs from a sentence (e.g., P01, P12)."""
-    return re.findall(r'\bP\d+\b', sentence)
+    """Extract citation IDs from markdown/LaTeX citation syntax."""
+    citations = set()
+
+    # [@id; @id2]
+    for bracket in re.findall(r'\[([^\]]+)\]', sentence):
+        for cid in re.findall(r'@([A-Za-z0-9_:\-.]+)', bracket):
+            citations.add(cid)
+
+    # Bare @id
+    for cid in re.findall(r'(?<!\w)@([A-Za-z0-9_:\-.]+)', sentence):
+        citations.add(cid)
+
+    # \cite{a,b}
+    for chunk in re.findall(r'\\cite[a-zA-Z]*\{([^}]+)\}', sentence):
+        for cid in chunk.split(','):
+            clean = cid.strip()
+            if clean:
+                citations.add(clean)
+
+    return sorted(citations)
+
+
+def _norm_id(value: str) -> str:
+    return re.sub(r'[^A-Za-z0-9]+', '', value).lower()
 
 
 # ========== DETECTOR 1: Claim-Evidence Grounding ==========
@@ -117,11 +146,14 @@ def verify_citations(sentence, cited_papers, extracted_db):
     """
     supported = False
     
+    normalized_lookup = {_norm_id(k): k for k in extracted_db.keys()}
+
     for pid in cited_papers:
-        if pid not in extracted_db:
+        resolved_pid = pid if pid in extracted_db else normalized_lookup.get(_norm_id(pid))
+        if not resolved_pid:
             continue
-            
-        paper = extracted_db[pid]
+
+        paper = extracted_db[resolved_pid]
         
         # Check if key terms from the sentence appear in paper's contributions/assumptions/limitations
         sentence_lower = sentence.lower()
@@ -369,6 +401,8 @@ def run_hallucination_checks(soa_text, extracted_db, critic_db=None):
         "severity": "high" if len(all_violations) > 5 else "medium" if len(all_violations) > 0 else "low",
         "total_claims": len(claims),
         "total_claims_checked": cited_claim_count,
+        "min_checked_claims_required": MIN_CHECKED_CLAIMS,
+        "checked_claims_threshold_met": cited_claim_count >= MIN_CHECKED_CLAIMS,
         "violations": {
             "ungrounded": len([v for v in all_violations if v.get("detector") == "claim_evidence_grounding"]),
             "bad_citations": len([v for v in all_violations if v.get("detector") == "citation_verification"]),
@@ -376,8 +410,9 @@ def run_hallucination_checks(soa_text, extracted_db, critic_db=None):
             "contradictions": len([v for v in all_violations if v.get("detector") == "contradiction_check"])
         },
         "total_violations": len(all_violations),
-        "hallucination_rate": (len(all_violations) / cited_claim_count) if cited_claim_count > 0 else 0.0,
-        "repair_triggered": len(all_violations) > 0,
+        "hallucination_rate": (len(all_violations) / cited_claim_count) if cited_claim_count >= MIN_CHECKED_CLAIMS else None,
+        "repair_triggered": (len(all_violations) > 0) and (cited_claim_count >= MIN_CHECKED_CLAIMS),
+        "low_confidence": cited_claim_count < MIN_CHECKED_CLAIMS,
         "details": all_violations
     }
     

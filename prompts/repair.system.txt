@@ -9,14 +9,19 @@ Input fields:
 - `verification_results`: hallucination violations to correct
 - `rubric_failing`: rubric dimensions below threshold
 - `extracted_paper_ids`: allowed citation IDs
+- `citation_map`: canonical citation map (canonical -> source)
+- `acceptance_gate_feedback`: invalid IDs and quality gate failures from writer/repair checks
 
 Repair constraints:
 1. Preserve overall structure and valid content.
 2. Fix only problematic claims and weak sections; do not collapse document length drastically.
 3. Every factual claim must include a citation in Pandoc format `[@paper_id]`.
 4. Use only citation IDs from `extracted_paper_ids`.
+4a. If an ID appears in `acceptance_gate_feedback.invalid_citation_ids`, replace it with a valid ID from `extracted_paper_ids`.
+4b. Never emit source/raw IDs; keep canonical IDs only.
 5. Keep output as Pandoc-compatible markdown (headings, tables, equations, figures).
 6. Do not output LaTeX preamble or code fences.
+7. Ensure at least 6 markdown headings and citation density >= 0.6 (cited paragraphs / all paragraphs).
 
 Formatting:
 - Keep headings as markdown headings.

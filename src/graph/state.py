@@ -35,6 +35,8 @@ class SOAState(TypedDict):
     synthesis: Optional[dict]  # Cross-paper synthesis
     synthesis_paper_coverage: float  # Fraction of extracted papers referenced in synthesis text (default 0.0)
     soa_draft: Optional[str]  # Current version of LaTeX SoA
+    citation_map: dict  # Canonical citation map (Pxxx -> source paper id)
+    db_run_id: str  # PostgreSQL run UUID (empty if DB disabled)
     prisma_metadata: Optional[dict]  # PRISMA search methodology metadata (if papers auto-fetched)
     citation_graph: Optional[dict]  # Directed graph of citation + thematic links
 
