@@ -35,6 +35,8 @@ class PostgresStore:
     def _connect(self):
         if not self.enabled:
             raise RuntimeError("PostgresStore is disabled. Set SOA_DB_DSN and install psycopg.")
+        if psycopg is None:
+            raise RuntimeError("psycopg is unavailable; install psycopg[binary]")
         return psycopg.connect(self.dsn)
 
     def init_schema(self, schema_path: Path | None = None) -> None:
@@ -152,7 +154,7 @@ class PostgresStore:
 
         return entries
 
-    def save_citation_map(self, entries: list[CitationMapEntry], path: Path) -> dict[str, Any]:
+    def save_citation_map(self, entries: list[CitationMapEntry], path: Path | None = None) -> dict[str, Any]:
         payload = {
             "version": 1,
             "generated_by": "postgres_store",
@@ -168,8 +170,9 @@ class PostgresStore:
             "canonical_to_source": {e.canonical_id: e.source_paper_id for e in entries},
             "source_to_canonical": {e.source_paper_id: e.canonical_id for e in entries},
         }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        if path is not None:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
         return payload
 
     def record_artifact(self, run_id: str, logical_name: str, artifact_type: str, local_path: str, content: str = "") -> None:

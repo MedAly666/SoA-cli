@@ -250,6 +250,66 @@ def _enforce_latex_title_abstract_and_hierarchy(
     return latex
 
 
+def _simplify_longtables(latex: str) -> str:
+    """Convert Pandoc longtable output into simpler table/tabular blocks."""
+
+    def _convert(block: str) -> str:
+        converted = re.sub(
+            r"\\begin\{minipage\}\[b\]\{\\linewidth\}\\raggedright\s*(.*?)\s*\\end\{minipage\}",
+            lambda m: m.group(1).strip(),
+            block,
+            flags=re.DOTALL,
+        )
+
+        rows: list[str] = []
+        pending_parts: list[str] = []
+        collecting_row = False
+
+        for ln in converted.splitlines():
+            s = ln.strip()
+            if not s:
+                continue
+            if s.startswith(r"\begin{longtable}") or s.startswith(r"\end{longtable}"):
+                continue
+            if s in {r"\toprule\noalign{}", r"\midrule\noalign{}", r"\bottomrule\noalign{}", r"\endhead", r"\endlastfoot"}:
+                continue
+            if s.startswith(r"\begin{minipage}") or s.startswith(r"\end{minipage}"):
+                continue
+
+            if not collecting_row and "&" not in s:
+                continue
+
+            collecting_row = True
+            pending_parts.append(s)
+            if s.endswith(r"\\"):
+                row = re.sub(r"\s+", " ", " ".join(pending_parts)).strip()
+                pending_parts = []
+                collecting_row = False
+                if "&" in row:
+                    rows.append(row)
+
+        if not rows:
+            return block
+
+        col_count = max(2, max(r.count("&") + 1 for r in rows))
+        colspec = "|" + "|".join(["l"] * col_count) + "|"
+
+        out: list[str] = [
+            r"\begin{table}[htbp]",
+            r"\centering",
+            r"\small",
+            f"\\begin{{tabular}}{{{colspec}}}",
+            r"\hline",
+        ]
+        for row in rows:
+            out.append(row)
+            out.append(r"\hline")
+        out.extend([r"\end{tabular}", r"\end{table}"])
+        return "\n".join(out)
+
+    return re.sub(r"\\begin\{longtable\}\[\]\{.*?\\end\{longtable\}", lambda m: _convert(m.group(0)), latex, flags=re.DOTALL)
+
+
 def _strip_yaml_front_matter(markdown_text: str) -> str:
     """Remove a leading YAML front matter block if present."""
     text = markdown_text
@@ -323,52 +383,6 @@ def _normalize_heading_hierarchy(markdown_text: str) -> str:
         out.append(f"{'#' * new_level} {heading_text}")
 
     return "\n".join(out).strip() + "\n"
-
-
-def _ensure_introduction_heading(markdown_text: str) -> str:
-    """Ensure an explicit Introduction section exists after Abstract."""
-    if re.search(r"(?mi)^#{1,3}\s+introduction\s*$", markdown_text):
-        return markdown_text
-
-    lines = markdown_text.splitlines()
-    abs_idx = -1
-    abs_level = 0
-    for i, ln in enumerate(lines):
-        m = re.match(r"^(#{1,6})\s+abstract\s*$", ln.strip(), flags=re.IGNORECASE)
-        if m:
-            abs_idx = i
-            abs_level = len(m.group(1))
-            break
-
-    if abs_idx < 0:
-        # Fallback: insert Introduction after title if no Abstract heading found.
-        title_idx = next((i for i, ln in enumerate(lines) if re.match(r"^#\s+", ln.strip())), None)
-        if title_idx is None:
-            return markdown_text
-        insert_at = title_idx + 1
-        while insert_at < len(lines) and not lines[insert_at].strip():
-            insert_at += 1
-        lines[insert_at:insert_at] = ["", "## Introduction", ""]
-        return "\n".join(lines).strip() + "\n"
-
-    # Find end of abstract content and insert Introduction immediately after it.
-    j = abs_idx + 1
-    while j < len(lines) and not lines[j].strip():
-        j += 1
-
-    # Consume abstract paragraph lines until next blank or heading of same/higher level.
-    while j < len(lines):
-        line = lines[j]
-        if not line.strip():
-            break
-        hm = re.match(r"^(#{1,6})\s+", line.strip())
-        if hm and len(hm.group(1)) <= abs_level:
-            break
-        j += 1
-
-    insert_at = j
-    lines[insert_at:insert_at] = ["", "## Introduction", ""]
-    return "\n".join(lines).strip() + "\n"
 
 
 def _remap_citation_ids(markdown_text: str, citation_map: dict[str, str]) -> str:
@@ -536,70 +550,6 @@ def _write_png_rgb(path: Path, pixels: list[list[RGB]]) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(signature + data)
-
-
-def _generate_year_distribution_figure(
-    extracted_dir: Path | None,
-    output_fig_path: Path,
-) -> tuple[Path | None, dict[int, int]]:
-    """Create a small publication-year bar chart PNG from extracted metadata."""
-    counts = _collect_year_counts(extracted_dir)
-    if not counts:
-        return None, counts
-
-    years = sorted(counts.keys())
-    values = [counts[y] for y in years]
-
-    width = 960
-    height = 540
-    margin_left = 80
-    margin_right = 40
-    margin_top = 40
-    margin_bottom = 80
-
-    plot_w = width - margin_left - margin_right
-    plot_h = height - margin_top - margin_bottom
-
-    max_val = max(values) if values else 1
-    bar_gap = max(6, int(plot_w * 0.01))
-    bar_w = max(10, int((plot_w - bar_gap * (len(values) + 1)) / max(1, len(values))))
-
-    white: RGB = (255, 255, 255)
-    axis: RGB = (50, 50, 50)
-    bar: RGB = (52, 113, 176)
-    grid: RGB = (226, 232, 240)
-
-    pixels: list[list[RGB]] = [[white for _ in range(width)] for _ in range(height)]
-
-    x0 = margin_left
-    y0 = margin_top + plot_h
-
-    # Horizontal grid lines.
-    for i in range(0, 6):
-        y = margin_top + int(plot_h * i / 5)
-        for x in range(margin_left, margin_left + plot_w + 1):
-            pixels[y][x] = grid
-
-    # Axes.
-    for x in range(margin_left, margin_left + plot_w + 1):
-        pixels[y0][x] = axis
-    for y in range(margin_top, margin_top + plot_h + 1):
-        pixels[y][x0] = axis
-
-    # Bars.
-    cursor = margin_left + bar_gap
-    for v in values:
-        h = int((v / max_val) * (plot_h - 4))
-        top = y0 - h
-        for x in range(cursor, min(cursor + bar_w, margin_left + plot_w)):
-            for y in range(max(margin_top, top), y0):
-                pixels[y][x] = bar
-        cursor += bar_w + bar_gap
-
-    _write_png_rgb(output_fig_path, pixels)
-    return output_fig_path, counts
-
-
 
 
 
@@ -816,7 +766,7 @@ def convert_markdown_to_latex(
 
     if bibliography_path is not None:
         bib_abs = bibliography_path.resolve().as_posix()
-        args.extend(["--natbib", f"--bibliography={bib_abs}"])
+        args.extend([f"--bibliography={bib_abs}", "--citeproc"])
 
     # Keep generated LaTeX predictable and paper-like.
     args.extend([
@@ -835,19 +785,7 @@ def convert_markdown_to_latex(
     # Keep title/abstract explicit in TeX and align subsection levels with markdown.
     title_meta, abstract_meta = _extract_title_and_abstract_metadata(md)
     latex = _enforce_latex_title_abstract_and_hierarchy(latex, md, title_meta, abstract_meta)
-
-    # Keep bibliography reference stable for BibTeX by using local filename only.
-    if bibliography_path is not None:
-        bib_name = bibliography_path.with_suffix("").name
-        latex = re.sub(r"\\bibliography\{[^}]+\}", f"\\\\bibliography{{{bib_name}}}", latex)
-
-        # Pandoc can emit natbib cites without appending \bibliography in some templates.
-        if "\\bibliography{" not in latex:
-            bib_line = f"\\bibliography{{{bib_name}}}\n"
-            if "\\end{document}" in latex:
-                latex = latex.replace("\\end{document}", bib_line + "\\end{document}")
-            else:
-                latex += "\n" + bib_line
+    latex = _simplify_longtables(latex)
 
     latex_path.parent.mkdir(parents=True, exist_ok=True)
     latex_path.write_text(latex, encoding="utf-8")
@@ -871,7 +809,9 @@ def parse_args() -> argparse.Namespace:
         help="Optional JSON map from canonical IDs to source bib IDs",
     )
     parser.add_argument("--ensure-pandoc", action="store_true", help="Download pandoc if missing")
-    parser.add_argument("--standalone", action="store_true", help="Generate standalone latex document")
+    parser.add_argument("--standalone", dest="standalone", action="store_true", help="Generate standalone latex document")
+    parser.add_argument("--no-standalone", dest="standalone", action="store_false", help="Generate latex fragment only")
+    parser.set_defaults(standalone=True)
     return parser.parse_args()
 
 

@@ -1,628 +1,559 @@
-# SOA-CLI: Production-Grade Multi-Agent State of the Art Generator
+# SOA-CLI: Automated State-of-the-Art Survey Generator
 
-A CLI-based multi-agent system for generating academically rigorous State of the Art sections from research papers. Built with **LangGraph** for fault-tolerant orchestration and the principles of **traceability**, **fact-grounding**, **hallucination prevention**, and **thematic priming**.
+**SOA-CLI** is a production-grade, multi-agent system that automatically generates publication-quality State-of-the-Art surveys from research papers. Built on LangGraph, it orchestrates 16 specialized agents through a fault-tolerant pipeline to produce academically rigorous surveys ready for submission to top-tier venues.
 
----
+## 🎯 What Does It Do?
+
+**Input**: A folder of PDF research papers + your research theme  
+**Output**: A publication-ready State-of-the-Art survey in Markdown format
+
+The system:
+- ✅ Extracts structured facts from papers (methods, results, limitations)
+- ✅ Performs cross-paper synthesis (identifies patterns, contradictions, gaps)
+- ✅ Generates publication-grade prose with proper citations
+- ✅ Self-validates and repairs hallucinations automatically
+- ✅ Produces surveys that meet standards of Nature Reviews, ACM Computing Surveys, IEEE TPAMI
 
 ## 🚀 Quick Start
 
-```bash
-# 1. Setup (installs dependencies including LangGraph)
-./setup.sh
+### Prerequisites
 
-# 2. Activate virtual environment
-source .venv/bin/activate
+1. **Python 3.8+**
+2. **LLM CLI Tool** - Install one of:
+   - `qwen` (recommended for getting started)
+   - `claude` (Anthropic)
+   - `gemini` (Google)
+   - `gpt` (OpenAI)
+   - `glm` (Zhipu AI)
 
-# 3. Configure environment
-cp .env.example .env
-# Edit .env (set LLM_PROVIDER, configure paper fetcher, etc.)
-
-# 4. Define your research scope
-python -m src.theme_builder template
-nano theme_input.json
-python -m src.theme_builder build
-
-# 5. Run pipeline (auto-searches for papers if none exist!)
-python3 soa_cli.py
-
-# If papers/ is empty, system automatically:
-#   → Searches academic databases (Semantic Scholar, arXiv)
-#   → Generates paper_candidates.json for review
-#   → Prompts you to approve candidates
-# Then:
-#   → Review paper_candidates.json  
-#   → Run: python soa_cli.py --download-papers
-#   → Run: python soa_cli.py (continues with SOA generation)
-
-# Output: state_of_the_art.tex
-```
-
-**Key Features**:
-- ✅ **Automatic paper discovery** with PRISMA methodology
-- ✅ Fault tolerance with automatic checkpointing
-- ✅ Explicit control flow with verification gates
-- ✅ Better error handling (accumulates, doesn't crash)
-- ✅ Type-safe state management
-- ✅ Resume from any point if interrupted
-
----
-
-## 🎯 Recent Enhancements
-
-SOA-CLI has been enhanced with five major improvements for reliability, flexibility, and user experience:
-
-### 0. **Quality & Grounding Pipeline Upgrade (NEW)**
-- ✅ Added **Citation Graph** node (`build_graph`) after vectorization
-- ✅ Added **Hierarchical Reflector** node (`L1 -> L2 -> L3`) before verification
-- ✅ Added **Rubric Evaluator** node (7-dimension ARISE-style scoring)
-- ✅ Reflector can route back to writer (max 2 rewrite attempts)
-- ✅ Repair now focuses on rubric-failing dimensions only
-- ✅ New artifacts:
-    - `artifacts/clusters/citation_graph.json`
-    - `artifacts/soa/reflector_feedback.json`
-    - `artifacts/soa/rubric_report.json`
-
-### 1. **Unified CLI-Based LLM Client with Retry Logic**
-- ✅ Routes to CLI binaries (claude, gemini, qwen, gpt, glm)
-- ✅ Exponential backoff retry (3 attempts: 2s, 4s, 8s delays)
-- ✅ Graceful failure handling (no pipeline crashes)
-- ✅ Provider verification at startup
-- 📝 Configure: `LLM_PROVIDER`, `LLM_MODEL`, `LLM_TIMEOUT` in `.env`
-
-### 2. **Dynamic Cluster Count Selection**
-- ✅ Auto-detects optimal cluster count using silhouette analysis
-- ✅ Tests k from 2 to 10, selects best
-- ✅ CLI flag: `--clusters auto` or `--clusters 5`
-- 📊 Handles edge cases (< 3 papers)
-
-### 3. **Multi-Format Output Export**
-- ✅ LaTeX (default), Markdown, Word formats
-- ✅ CLI flag: `--format latex|markdown|docx|all`
-- 📄 Output: `state_of_the_art.tex`, `.md`, `.docx`
-- 🎨 Word docs with styled formatting (headings, bold, citations)
-
-### 4. **Citation Style Configuration**
-- ✅ Supports IEEE, APA, Chicago, Harvard
-- ✅ Runtime injection into writer prompts
-- ✅ Configure: `CITATION_STYLE=ieee` in `.env`
-- 📚 Style-specific guidelines for LLMs
-
-### 5. **Smart PDF Truncation with Warnings**
-- ✅ Importance scoring (keeps Abstract/Intro/Methods/Results)
-- ✅ Drops References/Appendices first
-- ⚠️ Yellow console warnings with truncation stats
-- 📊 Metadata tracking in artifacts
-
-### 6. **Automatic Paper Discovery with PRISMA Methodology**
-- ✅ Auto-triggers when `papers/` directory is empty
-- ✅ Searches Semantic Scholar + arXiv with LLM-generated queries
-- ✅ PRISMA-compliant workflow (Identification → Screening → Eligibility)
-- ✅ Quality filters: venue whitelist, citation counts, year ranges
-- ✅ Predatory publisher detection
-- ✅ Generates `paper_candidates.json` for manual review
-- ✅ Full PRISMA report with flow diagrams
-- ✅ **Final SOA document includes PRISMA methodology section automatically**
-- 📝 Configure: `PAPER_SOURCES`, `PAPER_MIN_YEAR`, `PAPER_MIN_CITATIONS` in `.env`
-- 📚 See [PAPER_FETCHER_GUIDE.md](PAPER_FETCHER_GUIDE.md) for complete documentation
-
-**PRISMA in Your Document**: When papers are fetched via the paper fetcher, the generated State of the Art document automatically includes a comprehensive methodology section documenting:
-- Search strategy (databases, queries, dates)
-- PRISMA 4-stage selection process with flow diagram
-- Quality assessment criteria
-- Data extraction procedures
-
-This makes your literature review publication-ready and compliant with systematic review standards!
-
-**Example Commands**:
-```bash
-# Auto-detect clusters, export as Markdown, use APA citations
-python soa_cli.py --clusters auto --format markdown
-# (Set CITATION_STYLE=apa in .env)
-
-# Export all formats at once
-python soa_cli.py --format all
-
-# Manual cluster count override
-python soa_cli.py --clusters 4
-
-# Paper fetcher commands (automatic if papers/ is empty)
-python soa_cli.py --search-papers        # Manual paper search
-python soa_cli.py --download-papers      # Download approved papers
-python soa_cli.py --prisma-report        # Generate PRISMA report
-```
-
-See [CHANGELOG.md](CHANGELOG.md) for detailed documentation of all enhancements.
-
----
-
-## 📖 Documentation
-
-For detailed documentation, see the [docs/](docs/) directory:
-
-- **[docs/README.md](docs/README.md)** - Documentation index
-- **[docs/QUICKREF.md](docs/QUICKREF.md)** - Quick reference card
-- **[docs/USAGE.md](docs/USAGE.md)** - Complete usage guide
-- **[docs/LANGGRAPH_GUIDE.md](docs/LANGGRAPH_GUIDE.md)** - Architecture deep dive
-- **[docs/QUALITY_AND_GROUNDING_PIPELINE.md](docs/QUALITY_AND_GROUNDING_PIPELINE.md)** - Reflector, rubric, and citation graph
-- **[docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md)** - Thematic contract system
-- **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - Environment variables
-
----
-
-## 📁 Project Structure
-
-```
-soa-cli/
-├── soa_cli.py              # ⭐ MAIN ENTRY POINT (LangGraph orchestration)
-├── README.md               # This file
-├── requirements.txt        # Dependencies (includes LangGraph)
-├── setup.sh                # Automated setup script
-├── activate.sh             # Virtual environment activation
-│
-├── src/                    # Core implementation
-│   ├── graph/              # LangGraph architecture
-│   │   ├── state.py        # SOAState TypedDict
-│   │   ├── nodes.py        # 14 pipeline nodes
-│   │   └── builder.py      # Graph construction
-│   ├── theme_builder.py    # Thematic contract system
-│   ├── paper_fetcher.py    # PRISMA paper search & screening
-│   ├── pdf_parser.py       # Semantic PDF extraction
-│   ├── vectorize.py        # FAISS embeddings
-│   ├── similarity_cluster.py  # Clustering
-│   ├── citation_graph.py   # Citation + thematic graph builder
-│   ├── reflector.py        # Hierarchical quality reflector (L1/L2/L3)
-│   ├── rubric_evaluator.py # 7-dimension quality rubric scorer
-│   ├── hallucination_detector.py  # Verification
-│   ├── repair_loop.py      # Repair system
-│   ├── llm_client.py       # Unified LLM interface
-│   ├── exporter.py         # Multi-format export
-│   └── citation_formatter.py  # Citation styles
-│
-├── prompts/                # Agent system prompts (16 files)
-│   ├── theme_builder.system.txt
-│   ├── theme_description_to_json.system.txt
-│   ├── query_generator.system.txt
-│   ├── paper_screening.system.txt
-│   ├── reader.system.txt
-│   ├── extractor.system.txt
-│   ├── critic.system.txt
-│   ├── cluster.system.txt
-│   ├── synthesis.system.txt
-│   ├── writer.system.txt
-│   ├── reflector_L1.system.txt
-│   ├── reflector_L2.system.txt
-│   ├── reflector_L3.system.txt
-│   ├── rubric_evaluator.system.txt
-│   ├── verifier.system.txt
-│   └── repair.system.txt
-│
-├── config/                 # Configuration files
-│   └── venues.json         # Approved publication venues
-│
-├── scripts/                # Utility scripts
-│   └── check.py            # Pre-flight verification
-│
-├── papers/                 # Input PDFs (add your papers here)
-│
-├── artifacts/              # All outputs (organized by stage)
-│   ├── states/             # Pipeline states
-│   │   ├── initial_state.json
-│   │   └── final_state.json
-│   ├── prisma/             # Paper search results
-│   │   ├── prisma_report.json
-│   │   ├── prisma_flow_diagram.md
-│   │   └── excluded_papers.json
-│   ├── vector_db/          # Vector database
-│   │   ├── index.faiss
-│   │   └── meta.json
-│   ├── reader/             # Parsed papers
-│   ├── extracted/          # Extracted facts
-│   ├── critic/             # Quality assessments
-│   ├── clusters/           # Clustering outputs
-│   ├── synthesis/          # Cross-paper synthesis
-│   └── soa/                # ⭐ Final outputs
-│
-└── docs/                   # Complete documentation
-    ├── README.md           # Documentation index
-    ├── QUICKREF.md         # Quick reference
-    ├── USAGE.md            # Usage guide
-    ├── LANGGRAPH_GUIDE.md  # Architecture guide
-    ├── THEMATIC_PRIMING.md # Thematic system
-    ├── PAPER_FETCHER_GUIDE.md  # Paper search
-    ├── CONFIGURATION.md    # Configuration reference
-    └── ...                 # Additional guides
-```
-
----
-
-## 🏗️ Architecture
-
-SOA-CLI uses **LangGraph** for production-grade orchestration:
-
-```
-14 Nodes → Reflector Gate → Rubric Gate → Verification Gate → Repair Loop
-```
-
-**Pipeline:**
-1. **Theme Builder** - Global research scope
-2. **Reader Map** (parallel) - PDF text extraction
-3. **Extractor Map** (parallel) - Fact extraction
-4. **Critic Map** (parallel) - Methodology evaluation
-5. **Vectorize** - FAISS embeddings
-6. **Build Graph** - Citation + thematic graph grounding
-7. **Cluster** - Similarity grouping
-8. **Interpret Clusters** - Thematic analysis
-9. **Synthesis** - Cross-paper reasoning with graph context
-10. **Writer** - LaTeX generation
-11. **Reflector** - Hierarchical quality checks (outline/section/paragraph)
-12. **Rubric Evaluator** - 7-dimension scoring and failing dimensions
-13. **Verifier** - Hallucination detection
-14. **Repair** (conditional) - Iterative targeted fixes
-
-**Key Features:**
-- ✅ Automatic checkpointing (resume from any node)
-- ✅ Type-safe state (extended TypedDict with quality/grounding fields)
-- ✅ Verification gates with conditional routing
-- ✅ Reflector rewrite gate (max 2 rewrites)
-- ✅ Rubric-driven targeted repair
-- ✅ Repair loop with max iteration guard
-- ✅ Parallel processing (Reader, Extractor, Critic)
-- ✅ Error accumulation (doesn't crash)
-
-**Performance:** ~10-15 minutes for 10 papers
-
----
-
-## 🔧 Installation
-
-**Prerequisites**:
-- Python 3.8+
-- LLM CLI (qwen, gemini, claude, etc.)
-- Research papers in PDF format
-
-**Setup**:
+### Installation
 
 ```bash
-# Automated setup (creates .venv, installs dependencies)
-./setup.sh
+# Clone repository
+git clone <repository-url>
+cd SOA-CLI
 
-# Activate the virtual environment
-source .venv/bin/activate
+# Install dependencies
 pip install -r requirements.txt
-mkdir -p papers artifacts
+
+# Configure environment
+cp .env.example .env
+# Edit .env to set your LLM_PROVIDER and other settings
 ```
 
-**Note**: Always activate the virtual environment before running the pipeline:
+### Basic Usage
+
 ```bash
-source .venv/bin/activate
-# OR use the convenience script:
-source activate.sh
+# 1. Add your PDF papers to the papers/ directory
+mkdir -p papers
+cp /path/to/your/papers/*.pdf papers/
+
+# 2. Run the pipeline
+python soa_cli.py
+
+# 3. Find your survey
+# Output: STATE_OF_THE_ART.md
 ```
 
-To deactivate when done:
+That's it! The system will:
+1. Build a thematic contract from your papers
+2. Extract facts from all PDFs in parallel
+3. Cluster papers by similarity
+4. Synthesize cross-paper insights
+5. Write a publication-grade survey
+6. Verify and repair any hallucinations
+7. Output the final markdown document
+
+## 📖 How to Use This Efficiently
+
+### 1. Define Your Research Theme
+
+**Option A: Interactive (Recommended for First-Time Users)**
 ```bash
-deactivate
+# Just run the pipeline - it will prompt you
+python soa_cli.py
+# Enter: "Analyze deep learning methods for image generation quality assessment"
 ```
 
-## 📖 Usage
-
-### Step 1: Define Your Research Scope (REQUIRED)
-
-Before running the pipeline, define your thematic scope:
-
+**Option B: Manual Control**
 ```bash
-# Create template
-python -m src.theme_builder template
-
-# Edit with your research focus
-nano theme_input.json
-
-# Build thematic contract
-python -m src.theme_builder build
+# Create theme input
+python src/theme_builder.py template
+# Edit theme_input.json with your research scope
+python src/theme_builder.py build
+# Review THEMATIC_CONTRACT.json
+python soa_cli.py
 ```
 
-This creates `THEMATIC_CONTRACT.json` - the **single source of truth** that guides all agents.
+**What is a Thematic Contract?**
+- Defines your research scope (what's in, what's out)
+- Lists core questions your survey will answer
+- Guides all agents to focus on relevant content
+- Prevents scope drift and off-topic content
 
-**Why this matters**: Thematic priming ensures focused extraction and faster processing. See [docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md) for details.
+### 2. Prepare Your Papers
 
-### Step 2: Add Papers
-
+**Manual Collection**
 ```bash
-# Copy your PDF papers to the papers directory
-cp /path/to/papers/*.pdf papers/
+# Simply drop PDFs into papers/
+cp ~/Downloads/*.pdf papers/
+python soa_cli.py
 ```
 
-### Step 3: Run Pipeline
-
-**Basic Usage**:
-
+**Automatic Paper Search (PRISMA Methodology)**
 ```bash
-python3 soa_cli.py
+# Search for papers automatically
+python soa_cli.py --search-papers
+# Review candidates in paper_candidates.json
+# Edit 'status' field: 'approved' or 'rejected'
+python soa_cli.py --download-papers
+# Run pipeline
+python soa_cli.py
 ```
 
-The pipeline processes all papers with:
-- ✅ Automatic PDF text extraction
-- ✅ Parallel processing (Reader, Extractor, Critic)
-- ✅ Clustering and synthesis
-- ✅ LaTeX generation
-- ✅ Verification and repair (up to 3 iterations)
+### 3. Configure for Your Needs
 
-**Output**: `state_of_the_art.tex` in the root directory
-
-**Advanced Options**:
+Edit `.env` to customize:
 
 ```bash
-# Custom papers directory
-python3 soa_cli.py --papers /path/to/pdfs
+# LLM Configuration
+LLM_PROVIDER=qwen          # Your CLI tool
+LLM_MODEL=                 # Leave empty for default
+LLM_TIMEOUT=300            # Increase for large surveys
 
+# Pipeline Settings
+MAX_WORKERS=10             # Parallel processing (adjust for your CPU)
+MAX_PDF_CHARS=30000        # ~15-20 pages per paper
+CLUSTER_COUNT=6            # Number of paper clusters (or 'auto')
+
+# PDF Extraction
+USE_SEMANTIC_PDF=true      # Extract figures/tables (recommended)
+INCLUDE_FIGURES_IN_TEXT=true
+INCLUDE_TABLES_IN_TEXT=true
+
+# Citation Style
+CITATION_STYLE=ieee        # ieee, apa, chicago, harvard
+```
+
+### 4. Advanced Usage
+
+**Resume from Checkpoint**
+```bash
+# If pipeline crashes, resume where it left off
+python soa_cli.py --resume
+```
+
+**Clean Start**
+```bash
+# Clear all cached artifacts
+python soa_cli.py --clean
+```
+
+**Custom Repair Iterations**
+```bash
+# Allow more repair attempts for better quality
+python soa_cli.py --max-repair 5
+```
+
+**Auto-detect Cluster Count**
+```bash
+# Let the system determine optimal clusters
+python soa_cli.py --clusters auto
+```
+
+### 5. Understanding Output
+
+**Primary Output**
+- `STATE_OF_THE_ART.md` - Your final survey (Markdown)
+- `db_outputs/soa/state_of_the_art.md` - Same content (canonical location)
+
+**Intermediate Artifacts** (for debugging)
+- `THEMATIC_CONTRACT.json` - Research scope definition
+- `db_outputs/soa/citation_map.json` - Paper ID mappings
+- `db_outputs/soa/rubric_report.json` - Quality scores
+- `db_outputs/soa/hallucination_report.json` - Verification results
+- `logs/` - Detailed execution logs
+
+## 🏗️ How the System Works Internally
+
+### Architecture Overview
+
+SOA-CLI uses **LangGraph** to orchestrate a 16-node pipeline where each node is a specialized agent:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    LANGGRAPH PIPELINE                        │
+│                                                              │
+│  theme_builder → reader_map → extractor_map → critic_map    │
+│       ↓              ↓             ↓              ↓          │
+│  vectorize → build_graph → cluster → interpret_clusters     │
+│       ↓              ↓             ↓              ↓          │
+│  synthesis → writer → reflector → rubric_evaluator          │
+│       ↓              ↓             ↓              ↓          │
+│  verifier → repair (loop) → final_output → figures_gen      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Pipeline Stages Explained
+
+#### Stage 1: Theme Building
+**Node**: `theme_builder`  
+**Purpose**: Create immutable thematic contract  
+**Input**: `theme_input.json` or interactive prompt  
+**Output**: `THEMATIC_CONTRACT.json`
+
+Defines:
+- Global research theme
+- Core questions to answer
+- In-scope topics (what to include)
+- Out-of-scope topics (what to exclude)
+- Preferred methods and evaluation criteria
+
+#### Stage 2: Paper Reading (Parallel)
+**Node**: `reader_map`  
+**Purpose**: Parse PDFs into structured text  
+**Parallelism**: Up to `MAX_WORKERS` papers simultaneously  
+**Output**: Structured JSON per paper
+
+Features:
+- **Semantic PDF parsing**: Extracts sections, figures, tables with context
+- **Smart truncation**: Prioritizes Abstract, Intro, Methods, Results over References
+- **Fallback**: Plain text extraction if semantic parsing fails
+
+#### Stage 3: Fact Extraction (Parallel)
+**Node**: `extractor_map`  
+**Purpose**: Extract structured facts from papers  
+**Parallelism**: Up to `MAX_WORKERS` papers simultaneously  
+**Output**: Structured facts per paper
+
+Extracts:
+- Research context (problem, questions, scope)
+- Methodology (algorithms, architectures, complexity)
+- Data & evaluation (datasets, baselines, metrics)
+- Results (quantitative findings, ablations, error analysis)
+- Assumptions and limitations
+
+#### Stage 4: Methodological Critique (Parallel)
+**Node**: `critic_map`  
+**Purpose**: Assess methodological quality  
+**Parallelism**: Up to `MAX_WORKERS` papers simultaneously  
+**Output**: Quality assessment per paper
+
+Evaluates:
+- Problem-method fit
+- Experimental rigor
+- Baseline fairness
+- Statistical validity
+- Reproducibility
+- Thematic relevance
+
+#### Stage 5: Vectorization
+**Node**: `vectorize`  
+**Purpose**: Create embeddings for clustering  
+**Technology**: FAISS + sentence-transformers  
+**Output**: Vector database
+
+#### Stage 6: Citation Graph Building
+**Node**: `build_graph`  
+**Purpose**: Build citation network  
+**Output**: Directed graph of paper relationships
+
+Captures:
+- Citation links between papers
+- Thematic similarity edges
+- Hierarchical structure
+
+#### Stage 7: Clustering
+**Node**: `cluster`  
+**Purpose**: Group papers by similarity  
+**Method**: K-means or auto-detection (silhouette analysis)  
+**Output**: Paper clusters
+
+#### Stage 8: Cluster Interpretation
+**Node**: `interpret_clusters`  
+**Purpose**: LLM interprets cluster meaning  
+**Output**: Named clusters with themes
+
+Identifies:
+- Cluster names (e.g., "Attention-Based Sequence Models")
+- Methodological cohesion
+- Within-cluster variations
+- Shared assumptions and limitations
+
+#### Stage 9: Cross-Paper Synthesis
+**Node**: `synthesis`  
+**Purpose**: Synthesize insights across papers  
+**Output**: Cross-paper patterns
+
+Generates:
+- Convergences (what papers agree on)
+- Contradictions (conflicting findings + explanations)
+- Methodological trade-offs
+- Temporal evolution
+- Research gaps
+
+#### Stage 10: Survey Writing
+**Node**: `writer`  
+**Purpose**: Generate publication-grade prose  
+**Output**: Markdown document
+
+Features:
+- Cross-paper synthesis (not paper-by-paper summaries)
+- Proper citation formatting (Pandoc-compatible)
+- Technical depth (equations, algorithms, tables)
+- Structured sections (Abstract, Intro, Methods, Analysis, Gaps, Conclusion)
+
+#### Stage 11: Hierarchical Reflection
+**Node**: `reflector`  
+**Purpose**: Multi-level quality check  
+**Levels**: L1 (structure), L2 (sections), L3 (paragraphs)  
+**Output**: Feedback for rewriting
+
+Checks:
+- Heading count and depth
+- Citation density
+- Section completeness
+- Logical flow
+
+**Loop**: If reflector fails, returns to writer (max 2 rewrites)
+
+#### Stage 12: Rubric Evaluation
+**Node**: `rubric_evaluator`  
+**Purpose**: Multi-dimensional quality scoring  
+**Output**: Scores + failing dimensions
+
+Dimensions:
+- Thematic coherence
+- Technical depth
+- Synthesis quality
+- Evidence & citation integrity
+- Critical analysis rigor
+- Writing quality
+- Structural completeness
+- Publication readiness
+
+#### Stage 13: Verification
+**Node**: `verifier`  
+**Purpose**: Detect hallucinations  
+**Output**: Violation list
+
+Checks:
+- Invalid citation IDs
+- Uncited claims
+- Citation-claim mismatches
+- Overgeneralizations
+
+#### Stage 14: Repair (Loop)
+**Node**: `repair`  
+**Purpose**: Fix hallucinations  
+**Loop**: Repair → Verifier (max `--max-repair` iterations)  
+**Output**: Corrected document
+
+#### Stage 15: Final Output
+**Node**: `final_output`  
+**Purpose**: Finalize and persist  
+**Output**: Timing summary, metadata
+
+#### Stage 16: Figures Generation (Skipped in DB Mode)
+**Node**: `figures_generator`  
+**Purpose**: Generate TikZ figures (LaTeX only)  
+**Status**: Skipped in current markdown-only mode
+
+### State Management
+
+**LangGraph State** (`SOAState`):
+- **Immutable inputs**: `thematic_contract`, `paper_paths`, `max_repair_iterations`
+- **Aggregating collections**: `reader_outputs`, `extracted_facts`, `critic_assessments` (merge across parallel ops)
+- **Single-value fields**: `embeddings`, `clusters`, `synthesis`, `soa_draft` (last write wins)
+- **Quality signals**: `rubric_scores`, `reflector_feedback`, `verification_results`
+- **Timing**: `stage_durations`, `total_wall_clock_seconds`
+
+**Persistence**:
+- **In-memory**: LangGraph state (checkpointed with MemorySaver)
+- **Disk**: Final markdown + intermediate JSON artifacts
+- **PostgreSQL** (optional): Run metadata, artifacts, metrics
+
+### Fault Tolerance
+
+**Parallel Processing**:
+- ThreadPoolExecutor for reader/extractor/critic stages
+- Errors isolated per paper (don't crash entire pipeline)
+- Partial results preserved
+
+**Retry Logic**:
+- LLM calls: 3 retries with exponential backoff
+- JSON parsing errors: Retry with stronger instructions
+- Markdown validation: Retry with completion instructions
+
+**Checkpointing**:
+- LangGraph MemorySaver enables `--resume`
+- Artifacts cached on disk (skip reprocessing)
+
+**Error Handling**:
+- Errors collected in `state["errors"]`
+- Pipeline continues despite individual failures
+- Final report shows all errors
+
+## 🔧 Configuration Reference
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_PROVIDER` | `qwen` | CLI tool: qwen, claude, gemini, gpt, glm |
+| `LLM_MODEL` | (empty) | Specific model or empty for default |
+| `LLM_TIMEOUT` | `120` | Timeout in seconds (increase for large tasks) |
+| `LLM_TEMPERATURE` | `0.3` | 0.0-1.0 (lower = more deterministic) |
+| `CITATION_STYLE` | `ieee` | ieee, apa, chicago, harvard |
+| `MAX_WORKERS` | `10` | Parallel processing threads |
+| `MAX_PDF_CHARS` | `30000` | Max chars per PDF (~15-20 pages) |
+| `CLUSTER_COUNT` | `6` | Number of clusters or 'auto' |
+| `USE_SEMANTIC_PDF` | `true` | Extract figures/tables/structure |
+| `EXTRACT_PDF_IMAGES` | `false` | Save figure images |
+| `INCLUDE_FIGURES_IN_TEXT` | `true` | Include figure captions in LLM input |
+| `INCLUDE_TABLES_IN_TEXT` | `true` | Include tables in LLM input |
+
+### Command-Line Options
+
+```bash
+python soa_cli.py [OPTIONS]
+
+Options:
+  --papers DIR          Papers directory (default: papers)
+  --max-repair N        Max repair iterations (default: 3)
+  --thread-id ID        Thread ID for checkpointing (default: default)
+  --resume              Resume from checkpoint
+  --clean               Clear all artifacts before running
+  --clusters N|auto     Number of clusters or 'auto' (default: auto)
+  --format FORMAT       Output format: markdown (default: markdown)
+```
+
+## 📊 Quality Assurance
+
+### Multi-Layer Validation
+
+1. **Reflector** (L1-L3): Structural and content quality
+2. **Rubric Evaluator**: 8-dimensional scoring
+3. **Verifier**: Hallucination detection
+4. **Repair Loop**: Automatic correction (up to `--max-repair` iterations)
+
+### Quality Metrics
+
+The system tracks:
+- Citation density (target: 60%+ of paragraphs cited)
+- Heading count (target: 6+ major sections)
+- Invalid citation rate (target: 0%)
+- Synthesis paper coverage (target: 50%+ papers referenced)
+- Rubric scores (target: 3.5+ on all dimensions)
+
+### Output Quality
+
+Generated surveys meet standards of:
+- Nature Reviews
+- ACM Computing Surveys
+- IEEE TPAMI
+- Annual Reviews
+- JMLR
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+**"CLI binary not found"**
+```bash
+# Install your chosen LLM CLI tool
+# For qwen: follow installation instructions
+# Verify: which qwen
+```
+
+**"Timeout during writer/synthesis"**
+```bash
+# Increase timeout in .env
+LLM_TIMEOUT=600
+```
+
+**"Low citation density"**
+```bash
 # Increase repair iterations
-python3 soa_cli.py --max-repair 5
-
-# Resume from checkpoint
-python3 soa_cli.py --resume --thread-id my-session
+python soa_cli.py --max-repair 5
 ```
-- You changed the prompts and want fresh extraction
-- You suspect extracted data is outdated
-- You want to use a different LLM model
 
-**Pipeline Stages**:
-0. Load thematic contract (or prompt you to create one)
-1. Read all PDFs from `papers/`
-2. Extract structured knowledge (theme-filtered)
-3. Evaluate methodological strength (theme-focused)
-4. Build vector database (theme-filtered papers only)
-5. Cluster papers by similarity (thematic clusters)
-6. Synthesize cross-paper insights (addressing core questions)
-7. Write State of the Art (theme-bounded)
-8. Detect and repair hallucinations
+**"Papers not clustering well"**
+```bash
+# Try auto-detection
+python soa_cli.py --clusters auto
+# Or adjust manually
+python soa_cli.py --clusters 8
+```
 
-### Run Individual Components
+**"PDF extraction truncated"**
+```bash
+# Increase max chars in .env
+MAX_PDF_CHARS=50000
+```
+
+**"Semantic parsing failed"**
+```bash
+# System auto-falls back to text-only
+# To force text-only mode:
+USE_SEMANTIC_PDF=false
+```
+
+### Debug Mode
 
 ```bash
-# Build thematic contract
-python -m src.theme_builder build
+# Enable detailed logging
+export DEBUG=true
+python soa_cli.py
 
-# View current contract
-python -m src.theme_builder show
-
-# Just build vector database
-python -m src.vectorize artifacts/extracted/
-
-# Just run clustering
-python -m src.similarity_cluster 6  # 6 clusters
-
-# Just check for hallucinations
-python -m src.hallucination_detector artifacts/soa/state_of_the_art.tex artifacts/extracted/
-
-# Just run repair loop
-python -m src.repair_loop artifacts/soa/state_of_the_art.tex artifacts/extracted/
+# Check logs
+tail -f logs/soa_pipeline_*.log
 ```
-
-## Output
-
-### Primary Output
-
-- `state_of_the_art.tex` (root) - Your complete, verified State of the Art
-- `artifacts/soa/state_of_the_art_draft.tex` - Initial draft before verification (for debugging)
-
-### Intermediate Artifacts
-
-- `artifacts/states/initial_state.json` - Pipeline initial state
-- `artifacts/states/final_state.json` - Pipeline final state  
-- `artifacts/prisma/prisma_report.json` - PRISMA paper search report  
-- `artifacts/prisma/excluded_papers.json` - Papers excluded during screening
-- `artifacts/reader/*.json` - Parsed paper structures
-- `artifacts/extracted/*.json` - Extracted facts per paper
-- `artifacts/critic/*.json` - Quality assessments
-- `artifacts/clusters/preclusters.json` - Raw similarity clusters
-- `artifacts/clusters/clusters.json` - Interpreted clusters
-- `artifacts/synthesis/synthesis.json` - Cross-paper synthesis
-- `artifacts/vector_db/index.faiss` - Vector index for similarity
-- `artifacts/vector_db/meta.json` - Vector database metadata
-
-### Verification Reports
-
-- `artifacts/soa/hallucination_report.json` - Detected violations
-- `artifacts/soa/repair_failure.json` - Unrepairable issues (if any)
-- `artifacts/soa/reflector_feedback.json` - L1/L2/L3 reflector findings and correction brief
-- `artifacts/soa/rubric_report.json` - ARISE-style quality scores and failing dimensions
-- `artifacts/clusters/citation_graph.json` - Citation/thematic grounding graph
-
-## ⚙️ Configuration
-
-Set environment variables to adjust:
-
-```python
-MODEL = None                 # Use default Qwen model (auto-detected)
-TEMPERATURE = 0.2            # Lower = more deterministic
-MAX_WORKERS = 6              # Parallel execution threads
-MAX_PDF_CHARS = 30000        # Characters per paper (~15-20 pages)
-```
-
-For clustering, adjust in [src/similarity_cluster.py](src/similarity_cluster.py):
-
-```python
-n_clusters = 6               # Number of paper groups
-```
-
-**Qwen Model**: System uses default Qwen Code model (auto-detected). If you need to specify a model, set `MODEL = "coder-model"` or your preferred model name.
-
-## Agent Constraints (IMPORTANT)
-
-Each agent has **strict rules** encoded in system prompts:
-
-- **Reader**: No summarization, no interpretation
-- **Extractor**: Only explicit facts, no inference
-- **Critic**: Skeptical but fair, evidence-based only
-- **Cluster**: Interprets precomputed clusters, cannot create new ones
-- **Synthesis**: Cross-paper patterns only, no single-paper descriptions
-- **Writer**: Cannot invent citations or introduce new concepts
-
-**These constraints are non-negotiable** for academic rigor.
-
-## Hallucination Detection
-
-4-layer verification system:
-
-1. **Claim-Evidence Grounding** - Vector similarity check
-2. **Citation Verification** - Cited papers must support claims
-3. **Fact Coverage** - No out-of-vocabulary concepts
-4. **Contradiction Check** - Cross-agent consistency
-
-Threshold: < 5 violations = acceptable, > 5 = automatic repair triggered
-
-## Repair Loop
-
-- Max 3 iterations
-- Repairs only flagged sentences
-- Uses explicit evidence from cited papers
-- If repair fails → generates failure report with specific issues
-
-## Paper Input Requirements
-
-Papers should be:
-- In PDF format
-- Named systematically (e.g., P01.pdf, P02.pdf, ...)
-- Complete (not just abstracts)
-- Readable by standard PDF parsers
-
-## LLM Provider Integration
-
-This system supports multiple LLM CLI providers through a unified interface:
-
-### Supported Providers
-- **Qwen** (default) - Open-source LLM
-- **Claude** - Anthropic's Claude models (Sonnet, Opus, Haiku)
-- **Gemini** - Google's Gemini models
-- **OpenAI** - GPT models
-- **Kilo** - Kilo AI models
-- **GLM** - Zhipu AI's GLM models
-
-### Configuration
-
-Set your provider in [.env](.env):
-
-```env
-# Choose your provider
-LLM_PROVIDER=qwen  # or claude, gemini, openai, kilo, glm
-
-# Specify model (optional, uses default if empty)
-LLM_MODEL=claude-sonnet-4.5  # or gpt-5.2, gemini-3-pro, etc.
-```
-
-### Requirements
-
-Install the CLI for your chosen provider:
-
-```bash
-# Qwen
-pip install qwen-cli
-
-# Claude
-npm install -g @anthropic/claude-cli
-
-# Gemini
-pip install google-generativeai
-
-# OpenAI
-pip install openai
-
-# GLM
-pip install zhipuai
-```
-
-See [docs/CONFIGURATION.md](docs/CONFIGURATION.md) for detailed setup instructions.
-
-## Academic Defense
-
-When questioned in your thesis defense:
-
-> "How did you ensure no hallucinations?"
-> 
-> → "We implemented a 4-layer verification system with automatic repair loops, ensuring every claim is grounded in extracted facts and supported by cited papers."
-
-> "How did you group the papers?"
-> 
-> → "We used cosine similarity on methodological embeddings, followed by agglomerative clustering, with LLM interpretation only for naming and explanation."
-
-> "Can you trace claims to sources?"
-> 
-> → "Yes, every claim includes paper IDs, and we maintain structured artifacts showing the complete chain from PDF to final text."
-
-## Troubleshooting
-
-### "No PDF files found"
-- Ensure PDFs are in `papers/` directory
-- Check file extensions are `.pdf`
-
-### "Qwen failed"
-- Verify Qwen CLI is installed: `which qwen`
-- Check model name is correct
-- Ensure sufficient API quota/resources
-
-### "Vector DB not available"
-- Run extraction first: extracted files needed before vectorization
-- Check `faiss-cpu` is installed: `pip install faiss-cpu`
-
-### "Unrepairable hallucinations"
-- Check `artifacts/soa/repair_failure.json` for specific issues
-- May indicate genuine gaps in your literature corpus
-- Consider adding more papers or narrowing scope
-
-## Performance
-
-For 43 papers:
-- **Reader**: ~5-10 min (depends on PDF complexity)
-- **Extractor + Critic**: ~10-15 min (parallel)
-- **Clustering**: ~2-3 min
-- **Synthesis**: ~3-5 min
-- **Writer**: ~2-3 min
-- **Verification**: ~2-3 min
-
-**Total**: ~25-40 minutes for complete pipeline
-
-## Citation
-
-If you use this system in your research:
-
-```
-This State of the Art was generated using a multi-agent verification system
-with mathematical clustering and iterative hallucination repair, ensuring
-full traceability and fact-grounding to the source literature.
-```
-
-## License
-
-Production research tool. Use responsibly. Ensure human verification of final output before submission.
-
----
-
-## Hard Truth (Coach Mode)
-
-If you:
-- Skip clustering
-- Let one agent do everything
-- Don't verify for hallucinations
-- Allow "creative" writing
-
-👉 Your SoA will be **academically weak**.
-
-This architecture is the **minimum viable serious system** for AI-assisted literature review.
-
-Reviewers **will** spot AI-generated content that lacks grounding. This system prevents that.
-
----
 
 ## 📚 Documentation
 
-- **[docs/README.md](docs/README.md)** - Documentation index and overview
-- **[docs/QUICKREF.md](docs/QUICKREF.md)** - Quick reference guide
-- **[docs/USAGE.md](docs/USAGE.md)** - Detailed usage instructions
-- **[docs/LANGGRAPH_GUIDE.md](docs/LANGGRAPH_GUIDE.md)** - Architecture deep dive
-- **[docs/THEMATIC_PRIMING.md](docs/THEMATIC_PRIMING.md)** - Thematic system guide
-- **[docs/PAPER_FETCHER_GUIDE.md](docs/PAPER_FETCHER_GUIDE.md)** - Paper search and PRISMA workflow
-- **[docs/CONFIGURATION.md](docs/CONFIGURATION.md)** - Environment variables and configuration
-- **[docs/SCHEMAS.md](docs/SCHEMAS.md)** - Data structure reference
-- **[docs/PROVIDER_SETUP.md](docs/PROVIDER_SETUP.md)** - LLM provider setup instructions
-- **[docs/vectordb.md](docs/vectordb.md)** - Clustering and vector database system
-- **[docs/hallucination.md](docs/hallucination.md)** - Verification and hallucination detection
+- **[User Guide](docs/USAGE.md)**: Detailed usage instructions
+- **[Configuration Guide](docs/CONFIGURATION.md)**: All settings explained
+- **[Implementation Summary](docs/IMPLEMENTATION_SUMMARY.md)**: Technical architecture
+- **[LangGraph Guide](docs/LANGGRAPH_GUIDE.md)**: Pipeline orchestration details
+- **[Provider Setup](docs/PROVIDER_SETUP.md)**: LLM CLI installation
+- **[Paper Fetcher Guide](docs/PAPER_FETCHER_GUIDE.md)**: Automatic paper search
+- **[Semantic PDF Guide](docs/SEMANTIC_PDF_IMPLEMENTATION.md)**: Enhanced extraction
+
+## 🤝 Contributing
+
+Contributions welcome! Areas for improvement:
+- Additional LLM providers
+- Enhanced figure generation
+- Multi-language support
+- Web interface
+- Batch processing
+
+## 📄 License
+
+[Add your license here]
+
+## 🙏 Acknowledgments
+
+Built with:
+- **LangGraph**: Pipeline orchestration
+- **FAISS**: Vector similarity search
+- **PyMuPDF**: PDF parsing
+- **sentence-transformers**: Embeddings
+- **scikit-learn**: Clustering
+
+## 📞 Support
+
+- Issues: [GitHub Issues](your-repo-url/issues)
+- Documentation: [docs/](docs/)
+- Examples: [examples/](examples/)
+
+---
+
+**Ready to generate your first survey?**
+
+```bash
+python soa_cli.py
+```
+
+The system will guide you through the process interactively!

@@ -1,332 +1,724 @@
-# Usage Guide - SOA-CLI
+# SOA-CLI User Guide
 
-## Initial Setup (One Time)
+Complete guide to using SOA-CLI efficiently for generating publication-quality surveys.
+
+## Table of Contents
+
+1. [Getting Started](#getting-started)
+2. [Workflow Overview](#workflow-overview)
+3. [Defining Your Research Theme](#defining-your-research-theme)
+4. [Preparing Papers](#preparing-papers)
+5. [Running the Pipeline](#running-the-pipeline)
+6. [Understanding Output](#understanding-output)
+7. [Optimizing Quality](#optimizing-quality)
+8. [Advanced Features](#advanced-features)
+9. [Troubleshooting](#troubleshooting)
+
+## Getting Started
+
+### Prerequisites
+
+1. **Python 3.8+**
+2. **LLM CLI Tool** - One of:
+   - `qwen` (recommended)
+   - `claude`
+   - `gemini`
+   - `gpt`
+   - `glm`
+
+### Installation
 
 ```bash
-# 1. Run setup script (creates .venv, installs dependencies)
-./setup.sh
+# Clone and install
+git clone <repo-url>
+cd SOA-CLI
+pip install -r requirements.txt
 
-# 2. Activate virtual environment (ALWAYS REQUIRED)
-source .venv/bin/activate
-
-# 3. Verify installation
-python3 test_langgraph.py
-
-# 4. Add your papers
-cp /path/to/your/papers/*.pdf papers/
+# Configure
+cp .env.example .env
+# Edit .env: set LLM_PROVIDER and other settings
 ```
 
-**Important**: Always activate the virtual environment before running any commands:
-```bash
-source .venv/bin/activate
-```
-
-## Running the Pipeline
-
-### Complete Pipeline (Recommended)
+### First Run
 
 ```bash
-python3 soa_cli.py
-```
-
-This will:
-- Process all PDFs with LangGraph orchestration
-- Generate State of the Art with automatic checkpointing
-- Build citation/thematic grounding graph
-- Run hierarchical reflector checks (L1/L2/L3)
-- Score quality rubric and track failing dimensions
-- Detect and fix hallucinations (up to 3 repair iterations)
-- Output: `state_of_the_art.tex`
-
-**Time**: 10-15 minutes for 10 papers (scales with paper count)
-
----
-
-## Advanced Options
-
-### Custom Papers Directory
-
-```bash
-python3 soa_cli.py --papers /path/to/pdfs
-```
-
-### Adjust Repair Iterations
-
-```bash
-# Default is 3, increase for more repair attempts
-python3 soa_cli.py --max-repair 5
-```
-
-### Resume from Checkpoint
-
-```bash
-# If pipeline was interrupted, resume where it left off
-python3 soa_cli.py --resume --thread-id my-session-id
-```
-
-### Custom Thread ID
-
-```bash
-# Use different thread IDs for parallel experiments
-python3 soa_cli.py --thread-id experiment-1
-```
-
----
-
-## Testing with Subset
-
-To test with just a few papers:
-
-```bash
-# 1. Create test directory
-mkdir papers_test
-cp papers/P01.pdf papers/P02.pdf papers/P03.pdf papers_test/
-
-# 2. Run with custom directory
-python3 soa_cli.py --papers papers_test
-
-# Output will be in state_of_the_art.tex
-```
-
----
-
-## Checking Progress
-
-All intermediate outputs are saved in `artifacts/`:
-
-```bash
-# Check extraction progress
-ls artifacts/extracted/*.json | wc -l
-
-# Check current state
-cat artifacts/states/final_state.json | jq '.pipeline_stage'
-
-# Check clustering
-cat artifacts/clusters/preclusters.json
-
-# Check synthesis
-cat artifacts/synthesis/synthesis.json
-
-# Check for hallucinations
-cat artifacts/soa/hallucination_report.json
-```
-
----
-
-## Troubleshooting
-
-### Pipeline Stops at Reader Stage
-
-**Problem**: PDF parsing fails
-
-**Solution**:
-```bash
-# Install PDF processing library
-pip install PyMuPDF
-```
-
-### "Qwen failed" Error
-
-**Problem**: Qwen CLI not working
-
-**Check**:
-```bash
-which qwen
-qwen --version
-```
-
-**Solution**: Ensure Qwen is installed and configured
-
-### High Hallucination Count
-
-**Problem**: Many violations detected
-
-**Solutions**:
-1. Check `artifacts/soa/hallucination_report.json` for details
-2. Review extracted data quality: `artifacts/extracted/P*.json`
-3. May need more papers or better quality papers
-4. System will auto-repair up to 3 iterations
-
-### Papers Not Found
-
-**Problem**: `[!] No PDF files found in papers/ directory`
-
-**Solution**:
-```bash
-# Check papers directory
-ls -la papers/
-
-# Verify PDF extensions
-ls papers/*.pdf
-
 # Add papers
-cp /path/to/pdfs/*.pdf papers/
+mkdir -p papers
+cp /path/to/papers/*.pdf papers/
+
+# Run
+python soa_cli.py
+
+# Output: STATE_OF_THE_ART.md
 ```
 
----
+## Workflow Overview
 
-## Configuration
+### Standard Workflow
 
-Use environment variables in `.env` instead of editing orchestration code directly.
+```
+1. Define Theme → 2. Add Papers → 3. Run Pipeline → 4. Review Output
+```
 
-Examples:
+### Detailed Steps
+
+1. **Theme Definition**
+   - Interactive prompt OR manual `theme_input.json`
+   - System generates `THEMATIC_CONTRACT.json`
+
+2. **Paper Collection**
+   - Manual: Drop PDFs in `papers/`
+   - Automatic: Use `--search-papers` (PRISMA methodology)
+
+3. **Pipeline Execution**
+   - 16-stage LangGraph pipeline
+   - Parallel processing (reader, extractor, critic)
+   - Automatic quality validation and repair
+
+4. **Output Review**
+   - `STATE_OF_THE_ART.md` - Final survey
+   - Quality reports in `db_outputs/soa/`
+
+## Defining Your Research Theme
+
+### Why Theme Matters
+
+The thematic contract:
+- Defines scope boundaries (in/out)
+- Lists core research questions
+- Guides all agents to focus on relevant content
+- Prevents scope drift
+
+### Method 1: Interactive (Recommended)
 
 ```bash
-LLM_PROVIDER=qwen
-LLM_MODEL=qwen-oauth
-LLM_TIMEOUT=800
-MAX_WORKERS=10
-CLUSTER_COUNT=auto
+python soa_cli.py
+# Prompt: "Enter theme description:"
+# Example: "Deep learning methods for medical image segmentation"
 ```
 
----
+System generates:
+- `theme_input.json` - Structured input
+- `THEMATIC_CONTRACT.json` - Final contract
 
-## Output Files
-
-### Primary Output
-
-- **state_of_the_art.tex**
-   - Main verified output in workspace root
-
-- **artifacts/soa/state_of_the_art.tex**
-   - Canonical pipeline copy used by evaluator nodes
-
-- **artifacts/soa/state_of_the_art_draft.tex**
-   - Initial writer output before downstream gates
-
-### Intermediate Artifacts (For Review)
-
-- **artifacts/extracted/PX.json** - Facts from each paper
-- **artifacts/critic/PX.json** - Quality assessment
-- **artifacts/clusters/clusters.json** - Paper groupings
-- **artifacts/synthesis/synthesis.json** - Cross-paper insights
-
-### Quality and Grounding Reports
-
-- **artifacts/clusters/citation_graph.json** - Citation/thematic graph
-- **artifacts/soa/reflector_feedback.json** - L1/L2/L3 findings and correction brief
-- **artifacts/soa/rubric_report.json** - 7-dimension quality scores and failing dimensions
-
-### Reports
-
-- **artifacts/soa/hallucination_report.json** - Verification results
-- **artifacts/soa/repair_failure.json** - Issues that couldn't be fixed (if any)
-
----
-
-## Integration with Thesis
-
-### LaTeX
-
-```latex
-\input{state_of_the_art.tex}
-```
-
-### Word
-
-1. Compile LaTeX to PDF
-2. Copy text from PDF
-3. Or use pandoc: `pandoc state_of_the_art.tex -o soa.docx`
-
----
-
-## Rerunning Pipeline
-
-Safe to rerun - artifacts are overwritten:
+### Method 2: Manual Control
 
 ```bash
-# Clean previous run (optional)
-rm -rf artifacts/* vector_db/*
+# Create template
+python src/theme_builder.py template
 
-# Run again
+# Edit theme_input.json
+{
+  "title": "Your Research Title",
+  "research_goals": [
+    "Goal 1: Analyze X methods",
+    "Goal 2: Compare Y approaches",
+    "Goal 3: Identify gaps in Z"
+  ],
+  "specific_constraints": [
+    "Focus on supervised learning only",
+    "Papers from 2020-2024",
+    "Medical imaging domain"
+  ],
+  "what_to_exclude": [
+    "Unsupervised methods",
+    "Non-medical applications",
+    "Theoretical-only papers"
+  ]
+}
+
+# Build contract
+python src/theme_builder.py build
+
+# Review
+python src/theme_builder.py show
+```
+
+### Theme Best Practices
+
+**Good Theme**:
+```json
+{
+  "title": "Transformer Architectures for Time Series Forecasting",
+  "research_goals": [
+    "Compare attention mechanisms for temporal data",
+    "Analyze scalability to long sequences",
+    "Evaluate performance on multivariate forecasting"
+  ],
+  "specific_constraints": [
+    "Transformer-based models only",
+    "Time series domain",
+    "Empirical evaluation required"
+  ],
+  "what_to_exclude": [
+    "RNN/LSTM architectures",
+    "Image/text domains",
+    "Purely theoretical work"
+  ]
+}
+```
+
+**Bad Theme** (too vague):
+```json
+{
+  "title": "Machine Learning",
+  "research_goals": ["Study ML methods"],
+  "specific_constraints": ["Recent papers"],
+  "what_to_exclude": ["Old papers"]
+}
+```
+
+## Preparing Papers
+
+### Manual Collection
+
+```bash
+# Simply add PDFs
+cp ~/Downloads/*.pdf papers/
 python soa_cli.py
 ```
 
----
+**Recommendations**:
+- 10-50 papers: Focused survey
+- 50-100 papers: Comprehensive survey
+- 100+ papers: May need to increase `MAX_WORKERS` and `LLM_TIMEOUT`
 
-## Paper Naming Convention
+### Automatic Paper Search (PRISMA)
 
-Recommended format:
+```bash
+# Step 1: Search
+python soa_cli.py --search-papers
+# Generates: paper_candidates.json
 
+# Step 2: Review candidates
+# Edit paper_candidates.json:
+# - Set "status": "approved" for papers you want
+# - Set "status": "rejected" for papers to exclude
+
+# Step 3: Download
+python soa_cli.py --download-papers
+# Downloads approved papers to papers/
+
+# Step 4: Run pipeline
+python soa_cli.py
 ```
-papers/
-├── P01_AuthorYear_ShortTitle.pdf
-├── P02_AuthorYear_ShortTitle.pdf
-├── ...
-└── P43_AuthorYear_ShortTitle.pdf
+
+**Configure Search** (in `.env`):
+```bash
+PAPER_SOURCES=semantic_scholar,arxiv
+PAPER_MAX_RESULTS=50
+PAPER_MIN_YEAR=2015
+PAPER_MIN_CITATIONS=10
+PAPER_REQUIRE_WHITELIST=true
 ```
 
-The system uses file name stem as paper ID (e.g., P01, P02).
+### Paper Quality Tips
+
+**Include**:
+- Peer-reviewed conference/journal papers
+- Papers with clear methodology
+- Papers with empirical evaluation
+- Papers from reputable venues
+
+**Exclude**:
+- Preprints without peer review (unless very recent)
+- Papers without methodology section
+- Papers without results
+- Duplicate papers (same work, different venues)
+
+## Running the Pipeline
+
+### Basic Run
+
+```bash
+python soa_cli.py
+```
+
+### Common Options
+
+```bash
+# Clean start (clear cache)
+python soa_cli.py --clean
+
+# More repair iterations (better quality)
+python soa_cli.py --max-repair 5
+
+# Auto-detect cluster count
+python soa_cli.py --clusters auto
+
+# Custom cluster count
+python soa_cli.py --clusters 8
+
+# Resume from checkpoint
+python soa_cli.py --resume
+
+# Custom papers directory
+python soa_cli.py --papers /path/to/papers
+```
+
+### Configuration Tuning
+
+Edit `.env` for your needs:
+
+**For Speed**:
+```bash
+MAX_WORKERS=20          # More parallel processing
+LLM_TIMEOUT=60          # Shorter timeout
+MAX_PDF_CHARS=20000     # Less text per paper
+```
+
+**For Quality**:
+```bash
+MAX_WORKERS=5           # More careful processing
+LLM_TIMEOUT=600         # Allow longer LLM calls
+MAX_PDF_CHARS=50000     # More text per paper
+USE_SEMANTIC_PDF=true   # Extract figures/tables
+```
+
+**For Large Surveys (100+ papers)**:
+```bash
+MAX_WORKERS=15
+LLM_TIMEOUT=900
+CLUSTER_COUNT=12
+```
+
+### Pipeline Stages
+
+The pipeline runs 16 stages automatically:
+
+1. **theme_builder**: Create thematic contract
+2. **reader_map**: Parse PDFs (parallel)
+3. **extractor_map**: Extract facts (parallel)
+4. **critic_map**: Assess quality (parallel)
+5. **vectorize**: Create embeddings
+6. **build_graph**: Build citation network
+7. **cluster**: Group similar papers
+8. **interpret_clusters**: Name clusters
+9. **synthesis**: Cross-paper insights
+10. **writer**: Generate survey
+11. **reflector**: Quality check (may loop to writer)
+12. **rubric_evaluator**: Score quality
+13. **verifier**: Detect hallucinations
+14. **repair**: Fix issues (may loop to verifier)
+15. **final_output**: Finalize
+16. **figures_generator**: (skipped in markdown mode)
+
+**Typical Runtime**:
+- 10 papers: 10-20 minutes
+- 50 papers: 30-60 minutes
+- 100 papers: 1-2 hours
+
+## Understanding Output
+
+### Primary Output
+
+**STATE_OF_THE_ART.md**
+- Final survey in Markdown format
+- Pandoc-compatible (can convert to LaTeX, PDF, DOCX)
+- Ready for submission after manual review
+
+**Structure**:
+```markdown
+# Title
+
+## Abstract
+
+## Introduction
+
+## Background
+
+## Methodology Taxonomy
+
+## Comparative Analysis
+
+## Cross-Cutting Synthesis
+
+## Research Gaps
+
+## Future Directions
+
+## Conclusion
+
+## References
+```
+
+### Quality Reports
+
+**db_outputs/soa/rubric_report.json**
+```json
+{
+  "scores": {
+    "thematic_coherence": 4.5,
+    "technical_depth": 4.2,
+    "synthesis_quality": 4.8,
+    "evidence_citation_integrity": 4.6,
+    "critical_analysis_rigor": 4.3,
+    "writing_quality": 4.4,
+    "structural_completeness": 4.7,
+    "publication_readiness": 4.5
+  },
+  "overall_assessment": "ready"
+}
+```
+
+**Interpretation**:
+- 5.0: Exceptional (top 5%)
+- 4.0-4.9: Strong (top 20%)
+- 3.0-3.9: Adequate (top 50%)
+- 2.0-2.9: Weak (needs work)
+- 1.0-1.9: Poor (major revision)
+
+**db_outputs/soa/hallucination_report.json**
+```json
+{
+  "total_claims_checked": 150,
+  "total_violations": 2,
+  "hallucination_rate": 0.013,
+  "repair_triggered": true,
+  "status": "completed"
+}
+```
+
+**Interpretation**:
+- 0% violations: Perfect
+- <5% violations: Excellent
+- 5-10% violations: Good (repaired)
+- >10% violations: Needs manual review
+
+### Intermediate Artifacts
+
+**THEMATIC_CONTRACT.json**
+- Research scope definition
+- Core questions
+- In/out scope boundaries
+
+**db_outputs/soa/citation_map.json**
+- Maps canonical IDs (P001, P002) to paper titles
+- Used for citation resolution
+
+**logs/soa_pipeline_*.log**
+- Detailed execution log
+- Useful for debugging
+
+## Optimizing Quality
+
+### Quality Checklist
+
+Before considering output final:
+
+1. **Thematic Coherence**
+   - [ ] All content aligns with theme
+   - [ ] No off-topic sections
+   - [ ] Core questions answered
+
+2. **Technical Depth**
+   - [ ] Equations/algorithms included where relevant
+   - [ ] Quantitative results cited
+   - [ ] Methodological details sufficient
+
+3. **Synthesis Quality**
+   - [ ] Cross-paper patterns identified
+   - [ ] Contradictions explained
+   - [ ] Trade-offs analyzed
+   - [ ] Gaps identified
+
+4. **Citation Integrity**
+   - [ ] All claims cited
+   - [ ] No invalid citations
+   - [ ] Citation density >60%
+
+5. **Critical Analysis**
+   - [ ] Limitations discussed
+   - [ ] Evidence quality assessed
+   - [ ] Uncertainty acknowledged
+
+### Improving Quality
+
+**If rubric scores <4.0**:
+
+```bash
+# Increase repair iterations
+python soa_cli.py --max-repair 5 --clean
+
+# Adjust LLM settings
+# In .env:
+LLM_TIMEOUT=600
+LLM_TEMPERATURE=0.2  # More deterministic
+```
+
+**If synthesis is weak**:
+
+```bash
+# Ensure enough papers
+# Minimum: 10 papers
+# Recommended: 20-50 papers
+
+# Check cluster count
+python soa_cli.py --clusters auto
+```
+
+**If citations are missing**:
+
+```bash
+# Check citation_map.json
+# Ensure all papers were extracted successfully
+# Re-run with --clean if needed
+```
+
+### Manual Review
+
+Always perform manual review:
+
+1. **Read Abstract and Introduction**
+   - Does it match your research goals?
+   - Is the scope clear?
+
+2. **Check Core Sections**
+   - Are all core questions answered?
+   - Is technical depth appropriate?
+
+3. **Verify Citations**
+   - Spot-check 5-10 citations
+   - Ensure claims match cited papers
+
+4. **Review Gaps Section**
+   - Are gaps meaningful?
+   - Are they evidence-based?
+
+5. **Polish Writing**
+   - Fix any awkward phrasing
+   - Ensure consistent terminology
+   - Add domain-specific nuance
+
+## Advanced Features
+
+### Custom Prompts
+
+All prompts are in `prompts/` directory:
+
+```bash
+# Edit prompts to customize behavior
+prompts/writer.system.txt       # Survey writing style
+prompts/synthesis.system.txt    # Synthesis approach
+prompts/extractor.system.txt    # Fact extraction
+# ... etc
+```
+
+**After editing prompts**:
+```bash
+python soa_cli.py --clean  # Force re-run with new prompts
+```
+
+### Semantic PDF Extraction
+
+Enhanced extraction mode (default: enabled):
+
+```bash
+# In .env:
+USE_SEMANTIC_PDF=true           # Extract structure
+INCLUDE_FIGURES_IN_TEXT=true    # Include figure captions
+INCLUDE_TABLES_IN_TEXT=true     # Include tables
+EXTRACT_PDF_IMAGES=false        # Save images (for vision LLM)
+```
+
+**Benefits**:
+- 60-80% more information vs plain text
+- Preserves figures, tables, equations
+- Maintains section structure
+- Better context understanding
+
+**Fallback**:
+- If semantic parsing fails, auto-falls back to text-only
+- No manual intervention needed
+
+### Citation Styles
+
+```bash
+# In .env:
+CITATION_STYLE=ieee     # [1], [2], [3]
+CITATION_STYLE=apa      # (Author, Year)
+CITATION_STYLE=chicago  # (Author Year)
+CITATION_STYLE=harvard  # (Surname Year)
+```
+
+### Batch Processing
+
+Process multiple surveys:
+
+```bash
+# Survey 1
+cp papers-set1/*.pdf papers/
+python soa_cli.py
+mv STATE_OF_THE_ART.md survey1.md
+
+# Survey 2
+python soa_cli.py --clean
+cp papers-set2/*.pdf papers/
+python soa_cli.py
+mv STATE_OF_THE_ART.md survey2.md
+```
+
+### PostgreSQL Persistence (Optional)
+
+Enable database persistence:
+
+```bash
+# In .env:
+SOA_DB_DSN=postgresql://user:pass@localhost/soa_db
+SOA_STORAGE_MODE=db
+SOA_DB_AUTO_INIT=true
+
+# Initialize schema
+python scripts/init_db.py
+```
+
+**Benefits**:
+- Persistent run history
+- Artifact versioning
+- Metrics tracking
+- Multi-user support
+
+## Troubleshooting
+
+### Common Issues
+
+#### "CLI binary not found"
+
+```bash
+# Check if CLI is installed
+which qwen  # or claude, gemini, etc.
+
+# If not found, install your chosen CLI
+# Then verify:
+qwen --help
+```
+
+#### "Timeout during writer/synthesis"
+
+```bash
+# Increase timeout in .env
+LLM_TIMEOUT=600
+
+# Or reduce input size
+MAX_PDF_CHARS=20000
+```
+
+#### "Low citation density"
+
+```bash
+# Increase repair iterations
+python soa_cli.py --max-repair 5
+
+# Check citation_map.json exists
+ls db_outputs/soa/citation_map.json
+```
+
+#### "Papers not clustering well"
+
+```bash
+# Try auto-detection
+python soa_cli.py --clusters auto
+
+# Or adjust manually
+python soa_cli.py --clusters 8  # More clusters
+python soa_cli.py --clusters 4  # Fewer clusters
+```
+
+#### "PDF extraction truncated"
+
+```bash
+# Increase max chars
+# In .env:
+MAX_PDF_CHARS=50000
+
+# Or enable semantic parsing
+USE_SEMANTIC_PDF=true
+```
+
+#### "Semantic parsing failed"
+
+```bash
+# Check logs
+tail -f logs/soa_pipeline_*.log
+
+# System auto-falls back to text-only
+# To force text-only mode:
+USE_SEMANTIC_PDF=false
+```
+
+#### "Out of memory"
+
+```bash
+# Reduce parallel workers
+MAX_WORKERS=5
+
+# Reduce PDF chars
+MAX_PDF_CHARS=20000
+
+# Process in batches
+# Split papers into smaller sets
+```
+
+### Debug Mode
+
+```bash
+# Enable detailed logging
+export DEBUG=true
+python soa_cli.py
+
+# Check logs
+tail -f logs/soa_pipeline_*.log
+
+# Check intermediate artifacts
+ls -la db_outputs/soa/
+```
+
+### Getting Help
+
+1. **Check logs**: `logs/soa_pipeline_*.log`
+2. **Review quality reports**: `db_outputs/soa/*.json`
+3. **Verify configuration**: `.env`
+4. **Check documentation**: `docs/`
+5. **Open issue**: GitHub Issues
+
+## Best Practices
+
+### For Best Results
+
+1. **Start Small**: Test with 10-20 papers first
+2. **Define Theme Clearly**: Specific scope = better output
+3. **Curate Papers**: Quality over quantity
+4. **Review Incrementally**: Check rubric scores after each run
+5. **Iterate**: Use `--max-repair` to improve quality
+6. **Manual Polish**: Always review and refine output
+
+### Workflow Tips
+
+1. **Theme First**: Define theme before collecting papers
+2. **Pilot Run**: Test with subset of papers
+3. **Adjust Settings**: Tune based on pilot results
+4. **Full Run**: Process all papers
+5. **Quality Check**: Review rubric and hallucination reports
+6. **Manual Review**: Read and polish output
+7. **Iterate**: Re-run with adjustments if needed
+
+### Time Management
+
+- **Quick draft** (1 hour): 10 papers, default settings
+- **Quality survey** (2-4 hours): 30-50 papers, `--max-repair 5`
+- **Comprehensive survey** (4-8 hours): 100+ papers, tuned settings
+
+## Next Steps
+
+- **[Configuration Guide](CONFIGURATION.md)**: Detailed settings reference
+- **[Implementation Summary](IMPLEMENTATION_SUMMARY.md)**: Technical architecture
+- **[LangGraph Guide](LANGGRAPH_GUIDE.md)**: Pipeline internals
+- **[Provider Setup](PROVIDER_SETUP.md)**: LLM CLI installation
 
 ---
 
-## Citation in Thesis
+**Ready to generate your survey?**
 
-Example methodology section:
-
-> "The State of the Art was generated using a multi-agent pipeline with 
-> mathematical similarity clustering and iterative hallucination repair. 
-> The system processes 43 papers through six specialized agents: Reader, 
-> Extractor, Critic, Cluster, Synthesis, and Writer. A four-layer 
-> verification system ensures all claims are grounded in extracted facts 
-> with automatic repair of unsupported statements."
-
----
-
-## Performance Tips
-
-### Speed Up Processing
-
-1. **Reduce temperature** (faster, more deterministic):
-   ```python
-   TEMPERATURE = 0.1
-   ```
-
-2. **Increase parallelism** (if you have CPU/GPU):
-   ```python
-   MAX_WORKERS = 12
-   ```
-
-3. **Use smaller model** (less accurate):
-   ```python
-   MODEL = "qwen2.5-7b"
-   ```
-
-### Improve Quality
-
-1. **Increase temperature slightly** (more creative):
-   ```python
-   TEMPERATURE = 0.3
-   ```
-
-2. **Adjust cluster count** (more specific themes):
-   ```python
-   n_clusters = 8
-   ```
-
-3. **Review and edit prompts** in `prompts/` directory
-
----
-
-## Support
-
-Issues to check first:
-
-1. Run `./check.py` to verify setup
-2. Check `artifacts/soa/hallucination_report.json`
-3. Review individual paper extractions in `artifacts/extracted/`
-4. Ensure Qwen CLI is working: `qwen run --help`
-
----
-
-## Next Steps After Generation
-
-1. **Read the output** - Don't submit without reading
-2. **Verify citations** - Check key papers manually
-3. **Add your interpretation** - Add your perspective
-4. **Integrate with your work** - Show where you fit in
-5. **Get supervisor feedback** - This is still a draft
-
----
-
-**Remember**: This system generates a **high-quality draft**, not a final submission. Human review and refinement are essential.
+```bash
+python soa_cli.py
+```

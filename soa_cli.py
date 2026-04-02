@@ -248,7 +248,7 @@ def run_pipeline(
     max_repair: int = 3,
     thread_id: str = "default",
     resume: bool = False,
-    output_format: str = "latex"
+    output_format: str = "markdown"
 ) -> dict:
     """
     Run the complete SOA pipeline with LangGraph.
@@ -271,42 +271,7 @@ def run_pipeline(
     print(f"\n[Setup] Loading papers from {papers_dir}...")
     all_paper_paths = load_paper_paths(papers_dir, allow_empty=True)
     
-    # Load PRISMA metadata if available
     prisma_metadata = None
-    candidates_file = Path("paper_candidates.json")
-    if candidates_file.exists():
-        try:
-            with open(candidates_file, 'r', encoding='utf-8') as f:
-                candidates_data = json.load(f)
-                search_metadata = candidates_data.get('search_metadata', {})
-                
-                # Transform to PRISMA report format
-                if search_metadata:
-                    prisma_metadata = {
-                        "identification": {
-                            "total_records": search_metadata.get('total_identified', 0),
-                            "by_source": {},  # Could be extracted if stored
-                            "search_date": search_metadata.get('search_date', ''),
-                            "queries": search_metadata.get('queries_used', [])
-                        },
-                        "screening": {
-                            "duplicates_removed": search_metadata.get('duplicates_removed', 0),
-                            "records_screened": search_metadata.get('screened', 0),
-                            "excluded_abstract": search_metadata.get('total_identified', 0) - search_metadata.get('screened', 0)
-                        },
-                        "eligibility": {
-                            "full_text_assessed": search_metadata.get('screened', 0),
-                            "excluded_full_text": search_metadata.get('screened', 0) - search_metadata.get('eligible', 0)
-                        },
-                        "included": {
-                            "total_included": search_metadata.get('eligible', 0)
-                        },
-                        "databases": search_metadata.get('databases', []),
-                        "total_papers": len(all_paper_paths)
-                    }
-                    print("  ✓ PRISMA methodology metadata loaded")
-        except Exception as e:
-            print(f"  ⚠️  Could not load PRISMA metadata: {e}")
     
     # If no papers found, trigger automatic paper search
     if not all_paper_paths:
@@ -341,21 +306,11 @@ def run_pipeline(
     
     print(f"  Found {len(all_paper_paths)} papers")
     
-    # Check for existing artifacts and load them
-    print("\n[Setup] Checking for existing artifacts...")
-    existing_reader, existing_extracted, existing_critic, unprocessed_paths = load_existing_artifacts(all_paper_paths)
-    
-    already_processed = len(existing_reader)
-    need_processing = len(unprocessed_paths)
-    
-    if already_processed > 0:
-        print(f"  ✓ Found {already_processed} already processed papers")
-        print(f"  → Will process {need_processing} new/incomplete papers")
-    else:
-        print(f"  → No existing artifacts, will process all {need_processing} papers")
-    
-    # Create artifacts directory
-    Path("artifacts").mkdir(exist_ok=True)
+    # DB mode processes from current paper set and keeps state in DB + in-memory graph state.
+    unprocessed_paths = all_paper_paths
+    existing_reader = {}
+    existing_extracted = {}
+    existing_critic = {}
     
     # Compile graph
     print("\n[Setup] Compiling LangGraph...")
@@ -366,14 +321,6 @@ def run_pipeline(
     
     if not resume:
         print("\n[Setup] Creating initial state...")
-        
-        # Determine if we can skip to clustering
-        skip_to_clustering = (need_processing == 0 and already_processed > 0)
-        
-        if skip_to_clustering:
-            print("\n  ⚡ All papers already processed!")
-            print("  → Skipping Reader/Extractor/Critic stages")
-            print("  → Starting from Clustering stage")
         
         initial_state = create_initial_state(
             unprocessed_paths,  # Only unprocessed papers
@@ -389,11 +336,6 @@ def run_pipeline(
         initial_state["stage_start_times"] = {}
         initial_state["stage_durations"] = {}
         initial_state["total_wall_clock_seconds"] = 0.0
-        
-        # Save initial state
-        serializable_initial = {k: v for k, v in initial_state.items() if v is not None and k != 'embeddings'}
-        with open("artifacts/initial_state.json", 'w', encoding='utf-8') as f:
-            json.dump(serializable_initial, f, indent=2)
     else:
         print("\n[Setup] Resuming from checkpoint...")
         initial_state = None  # Will load from checkpoint
@@ -427,97 +369,28 @@ def run_pipeline(
     print(f"Verification: {'PASSED' if final_state.get('verification_passed') else 'FAILED'}")
     print(f"Repair iterations: {final_state.get('repair_iteration', 0)}/{final_state.get('max_repair_iterations', 0)}")
     
-    # Save final state
-    Path("artifacts/states").mkdir(parents=True, exist_ok=True)
-    output_file = "artifacts/states/final_state.json"
-    # Only save serializable parts
-    serializable_state = {
-        k: v for k, v in final_state.items()
-        if k not in ['embeddings'] and v is not None
-    }
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump(serializable_state, f, indent=2)
-    
-    print(f"\n✓ Final state saved to {output_file}")
-    
-    # Export State of the Art in requested format(s)
+    # Export final markdown only.
     soa_draft = final_state.get('soa_draft')
     if soa_draft:
-        from src.exporter import SOAExporter, export_all_formats
-        
-        print(f"\n[Export] Generating output in '{output_format}' format...")
-        
-        exporter = SOAExporter()
-        storage_mode = os.getenv("SOA_STORAGE_MODE", "db").strip().lower()
-        output_dir = "db_outputs/soa" if storage_mode not in {"legacy", "hybrid", "files", "artifact", "artifacts"} else "artifacts/soa"
-        fallback_output_dir = "artifacts/soa" if output_dir != "artifacts/soa" else "db_outputs/soa"
-        base_name = "state_of_the_art"
+        print("\n[Export] Generating markdown output...")
+        output_dir = "db_outputs/soa"
+        fallback_output_dir = "db_outputs/soa"
         markdown_path = Path(output_dir) / "state_of_the_art.md"
-        latex_path = Path(output_dir) / "state_of_the_art.tex"
 
         if not markdown_path.exists():
             alt = Path(fallback_output_dir) / "state_of_the_art.md"
             if alt.exists():
                 markdown_path = alt
-        if not latex_path.exists():
-            alt = Path(fallback_output_dir) / "state_of_the_art.tex"
-            if alt.exists():
-                latex_path = alt
-        
-        if output_format == "all":
-            # Export markdown from canonical markdown artifact if present.
-            if markdown_path.exists():
-                shutil.copy2(markdown_path, "STATE_OF_THE_ART.md")
-            else:
-                with open(Path(output_dir) / "state_of_the_art.md", 'w', encoding='utf-8') as f:
-                    f.write(str(soa_draft))
-                with open("STATE_OF_THE_ART.md", 'w', encoding='utf-8') as f:
-                    f.write(str(soa_draft))
 
-            # Export LaTeX from converted artifact if available.
-            if latex_path.exists():
-                shutil.copy2(latex_path, "state_of_the_art.tex")
-                print(f"✓ LaTeX: state_of_the_art.tex")
-            else:
-                print(f"! LaTeX artifact not found at {output_dir}/state_of_the_art.tex")
-
-            # Keep docx conversion path from exporter (expects latex-like content, best effort).
-            try:
-                exporter.to_docx(str(soa_draft), f"{output_dir}/{base_name}.docx")
-                exporter.to_docx(str(soa_draft), "STATE_OF_THE_ART.docx")
-                print(f"✓ Word: STATE_OF_THE_ART.docx")
-            except Exception as e:
-                print(f"! Word export skipped/failed: {e}")
-            
-        elif output_format == "latex":
-            # LaTeX only - copy converted LaTeX artifact generated by writer/repair.
-            if latex_path.exists():
-                shutil.copy2(latex_path, "state_of_the_art.tex")
-                print(f"✓ LaTeX: state_of_the_art.tex")
-            else:
-                print(f"! LaTeX artifact not found at {output_dir}/state_of_the_art.tex")
-            
-        elif output_format == "markdown":
-            # Markdown only
-            if markdown_path.exists():
-                shutil.copy2(markdown_path, "STATE_OF_THE_ART.md")
-            else:
-                with open(f"{output_dir}/{base_name}.md", 'w', encoding='utf-8') as f:
-                    f.write(str(soa_draft))
-                with open("STATE_OF_THE_ART.md", 'w', encoding='utf-8') as f:
-                    f.write(str(soa_draft))
-            print(f"✓ Markdown: STATE_OF_THE_ART.md")
-            
-        elif output_format == "docx":
-            # Word only
-            try:
-                exporter.to_docx(soa_draft, f"{output_dir}/{base_name}.docx")
-                # Also save main output
-                exporter.to_docx(soa_draft, "STATE_OF_THE_ART.docx")
-                print(f"✓ Word: STATE_OF_THE_ART.docx")
-            except ImportError as e:
-                print(f"! Word export failed: {e}")
-                print(f"! Install python-docx: pip install python-docx")
+        if markdown_path.exists():
+            shutil.copy2(markdown_path, "STATE_OF_THE_ART.md")
+        else:
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
+            with open(Path(output_dir) / "state_of_the_art.md", 'w', encoding='utf-8') as f:
+                f.write(str(soa_draft))
+            with open("STATE_OF_THE_ART.md", 'w', encoding='utf-8') as f:
+                f.write(str(soa_draft))
+        print("✓ Markdown: STATE_OF_THE_ART.md")
     
     # Print errors if any
     errors = final_state.get('errors', [])
@@ -766,51 +639,12 @@ def main():
     parser.add_argument(
         "--format",
         type=str,
-        default="latex",
-        choices=["latex", "markdown", "docx", "all"],
-        help="Output format (default: latex). 'all' exports to all formats."
-    )
-    
-    # Paper fetcher arguments
-    parser.add_argument(
-        "--search-papers",
-        action="store_true",
-        help="Search for papers using PRISMA methodology and save candidates"
-    )
-    parser.add_argument(
-        "--search-and-download",
-        action="store_true",
-        help="Search for papers and automatically download eligible ones"
-    )
-    parser.add_argument(
-        "--download-papers",
-        action="store_true",
-        help="Download approved papers from paper_candidates.json"
-    )
-    parser.add_argument(
-        "--prisma-report",
-        action="store_true",
-        help="Generate PRISMA report from paper_candidates.json"
+        default="markdown",
+        choices=["markdown"],
+        help="Output format (markdown only in DB-first mode)."
     )
     
     args = parser.parse_args()
-    
-    # Handle paper fetcher commands
-    if args.search_papers:
-        search_papers_command(auto_download=False)
-        sys.exit(0)
-    
-    if args.search_and_download:
-        search_papers_command(auto_download=True)
-        sys.exit(0)
-    
-    if args.download_papers:
-        download_papers_command()
-        sys.exit(0)
-    
-    if args.prisma_report:
-        prisma_report_command()
-        sys.exit(0)
     
     # Parse clusters argument for main pipeline
     if args.clusters.lower() == 'auto':
